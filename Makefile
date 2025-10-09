@@ -25,7 +25,7 @@ build-all:
 	GOOS=windows GOARCH=amd64 go build -o $(BINARY_NAME)-windows-amd64.exe $(MAIN_FILE)
 	@echo "Multi-platform build complete"
 
-# Run the application with default parameters (requires BUCKET environment variable)
+# Run the complete test suite (requires BUCKET environment variable)
 .PHONY: run
 run:
 	@if [ -z "$(BUCKET)" ]; then \
@@ -33,7 +33,7 @@ run:
 		echo "Usage: make run BUCKET=your-bucket-name"; \
 		exit 1; \
 	fi
-	@echo "Running S3 performance test on bucket: $(BUCKET)"
+	@echo "Running S3 performance test suite on bucket: $(BUCKET)"
 	./$(BINARY_NAME) -bucket $(BUCKET)
 
 # Run with custom parameters
@@ -41,16 +41,16 @@ run:
 run-custom:
 	@if [ -z "$(BUCKET)" ]; then \
 		echo "Error: BUCKET environment variable is required"; \
-		echo "Usage: make run-custom BUCKET=your-bucket-name WORKERS=10 SIZE=10485760"; \
+		echo "Usage: make run-custom BUCKET=your-bucket-name CONCURRENCY=10 DURATION=5m"; \
 		exit 1; \
 	fi
-	@echo "Running S3 performance test with custom parameters..."
+	@echo "Running S3 performance test suite with custom parameters..."
 	./$(BINARY_NAME) -bucket $(BUCKET) \
-		-workers $(or $(WORKERS),4) \
-		-size $(or $(SIZE),1048576) \
-		-objects $(or $(OBJECTS),100) \
+		-concurrency $(or $(CONCURRENCY),10) \
 		-duration $(or $(DURATION),5m) \
-		-prefix $(or $(PREFIX),perf-test)
+		-prefix $(or $(PREFIX),perf-test) \
+		-global-endpoint $(or $(GLOBAL_ENDPOINT),"") \
+		-us-endpoints $(or $(US_ENDPOINTS),"")
 
 # Install dependencies
 .PHONY: deps
@@ -95,8 +95,9 @@ help:
 	@echo ""
 	@echo "  build        - Build the binary (default)"
 	@echo "  build-all    - Build for multiple platforms"
-	@echo "  run          - Run with default parameters (requires BUCKET env var)"
+	@echo "  run          - Run complete test suite (requires BUCKET env var)"
 	@echo "  run-custom   - Run with custom parameters (requires BUCKET env var)"
+	@echo "  test-endpoints - Run with specific endpoints (requires BUCKET, GLOBAL_ENDPOINT, US_ENDPOINTS)"
 	@echo "  deps         - Install dependencies"
 	@echo "  test         - Run tests"
 	@echo "  lint         - Run linter"
@@ -107,7 +108,8 @@ help:
 	@echo "Examples:"
 	@echo "  make build"
 	@echo "  make run BUCKET=my-test-bucket"
-	@echo "  make run-custom BUCKET=my-bucket WORKERS=10 SIZE=10485760"
+	@echo "  make run-custom BUCKET=my-bucket CONCURRENCY=10 DURATION=5m"
+	@echo "  make test-endpoints BUCKET=my-bucket GLOBAL_ENDPOINT=https://s3.amazonaws.com US_ENDPOINTS=https://s3.us-east-1.amazonaws.com"
 	@echo "  make clean"
 
 # Development targets
@@ -123,4 +125,19 @@ quick-test:
 		exit 1; \
 	fi
 	@echo "Running quick test (1 minute)..."
-	./$(BINARY_NAME) -bucket $(BUCKET) -duration 1m -workers 2 -objects 10
+	./$(BINARY_NAME) -bucket $(BUCKET) -duration 1m -concurrency 2
+
+# Test with specific endpoints
+.PHONY: test-endpoints
+test-endpoints:
+	@if [ -z "$(BUCKET)" ] || [ -z "$(GLOBAL_ENDPOINT)" ] || [ -z "$(US_ENDPOINTS)" ]; then \
+		echo "Error: BUCKET, GLOBAL_ENDPOINT, and US_ENDPOINTS environment variables are required"; \
+		echo "Usage: make test-endpoints BUCKET=your-bucket GLOBAL_ENDPOINT=https://s3.amazonaws.com US_ENDPOINTS=https://s3.us-east-1.amazonaws.com,https://s3.us-west-2.amazonaws.com"; \
+		exit 1; \
+	fi
+	@echo "Running test with specific endpoints..."
+	./$(BINARY_NAME) -bucket $(BUCKET) \
+		-global-endpoint $(GLOBAL_ENDPOINT) \
+		-us-endpoints $(US_ENDPOINTS) \
+		-concurrency $(or $(CONCURRENCY),10) \
+		-duration $(or $(DURATION),5m)

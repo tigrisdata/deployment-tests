@@ -263,68 +263,6 @@ func (t *S3PerformanceTester) testGETOperation(endpoint, key string) TestResult 
 	}
 }
 
-// createTestObjectsForGET creates test objects for GET operations
-func (t *S3PerformanceTester) createTestObjectsForGET(endpoint string, objectSize int64, objectCount int) {
-	client, exists := t.clients[endpoint]
-	if !exists {
-		return
-	}
-
-	// Generate test data
-	data := t.generateRandomData(objectSize)
-	keyPrefix := fmt.Sprintf("%s/latency-GET-%d", t.config.Prefix, objectSize)
-
-	// Calculate objects per worker
-	objectsPerWorker := objectCount / t.config.Concurrency
-	if objectsPerWorker == 0 {
-		objectsPerWorker = 1
-	}
-
-	// Create objects for each worker
-	for i := 0; i < t.config.Concurrency; i++ {
-		for j := 0; j < objectsPerWorker; j++ {
-			key := fmt.Sprintf("%s/worker-%d/obj-%d", keyPrefix, i, j)
-
-			client.PutObject(context.TODO(), &s3.PutObjectInput{
-				Bucket: aws.String(t.config.BucketName),
-				Key:    aws.String(key),
-				Body:   bytes.NewReader(data),
-			})
-		}
-	}
-}
-
-// createTestObjectsForGETThroughput creates test objects for GET throughput tests
-func (t *S3PerformanceTester) createTestObjectsForGETThroughput(endpoint string, objectSize int64, objectCount int) {
-	client, exists := t.clients[endpoint]
-	if !exists {
-		return
-	}
-
-	// Generate test data
-	data := t.generateRandomData(objectSize)
-	keyPrefix := fmt.Sprintf("%s/throughput-GET-%d", t.config.Prefix, objectSize)
-
-	// Calculate objects per worker
-	objectsPerWorker := objectCount / t.config.Concurrency
-	if objectsPerWorker == 0 {
-		objectsPerWorker = 1
-	}
-
-	// Create objects for each worker with the same key pattern as throughput benchmark
-	for workerID := 0; workerID < t.config.Concurrency; workerID++ {
-		for objID := 0; objID < objectsPerWorker; objID++ {
-			key := fmt.Sprintf("%s/worker-%d/obj-%d", keyPrefix, workerID, objID)
-
-			client.PutObject(context.TODO(), &s3.PutObjectInput{
-				Bucket: aws.String(t.config.BucketName),
-				Key:    aws.String(key),
-				Body:   bytes.NewReader(data),
-			})
-		}
-	}
-}
-
 // runLatencyBenchmark runs latency benchmark for a specific operation and size
 func (t *S3PerformanceTester) runLatencyBenchmark(operation string, objectSize int64, objectCount int, endpoint string) BenchmarkResult {
 	var results []TestResult
@@ -333,7 +271,8 @@ func (t *S3PerformanceTester) runLatencyBenchmark(operation string, objectSize i
 
 	// Generate test data
 	data := t.generateRandomData(objectSize)
-	keyPrefix := fmt.Sprintf("%s/latency-%s-%d", t.config.Prefix, operation, objectSize)
+	// Use PUT prefix for both PUT and GET operations so GET can reuse PUT objects
+	keyPrefix := fmt.Sprintf("%s/latency-PUT-%d", t.config.Prefix, objectSize)
 
 	// Calculate operations per worker
 	opsPerWorker := objectCount / t.config.Concurrency
@@ -381,7 +320,8 @@ func (t *S3PerformanceTester) runThroughputBenchmark(operation string, objectSiz
 
 	// Generate test data
 	data := t.generateRandomData(objectSize)
-	keyPrefix := fmt.Sprintf("%s/throughput-%s-%d", t.config.Prefix, operation, objectSize)
+	// Use PUT prefix for both PUT and GET operations so GET can reuse PUT objects
+	keyPrefix := fmt.Sprintf("%s/throughput-PUT-%d", t.config.Prefix, objectSize)
 
 	// Run operations for the specified duration
 	ctx, cancel := context.WithTimeout(context.Background(), t.config.TestDuration)
@@ -618,13 +558,12 @@ func (t *S3PerformanceTester) runLatencyBenchmarks() {
 			}
 		}
 
-		// GET latency tests (first create objects, then test GET)
+		// GET latency tests (reuse objects created by PUT tests)
 		fmt.Println("\nGET Latency Tests:")
 		for i, size := range t.config.ObjectSizes {
 			count := t.config.ObjectCounts[i]
 			fmt.Printf("  Testing %d bytes (%d objects)...", size, count)
-			// First create objects for GET testing
-			t.createTestObjectsForGET(endpoint, size, count)
+			// Reuse objects created by PUT tests
 			result := t.runLatencyBenchmark("GET", size, count, endpoint)
 			if result.ErrorOps > 0 {
 				fmt.Printf(" Avg: %v, P95: %v, P99: %v (%s%d success, %s%d failed%s)\n",
@@ -678,13 +617,12 @@ func (t *S3PerformanceTester) runThroughputBenchmarks() {
 			}
 		}
 
-		// GET throughput tests (first create objects, then test GET)
+		// GET throughput tests (reuse objects created by PUT tests)
 		fmt.Println("\nGET Throughput Tests:")
 		for i, size := range t.config.ObjectSizes {
 			count := t.config.ObjectCounts[i]
 			fmt.Printf("  Testing %d bytes (%d objects)...", size, count)
-			// First create objects for GET testing
-			t.createTestObjectsForGETThroughput(endpoint, size, count)
+			// Reuse objects created by PUT tests
 			result := t.runThroughputBenchmark("GET", size, count, endpoint)
 			if result.SuccessOps > 0 {
 				if result.ErrorOps > 0 {

@@ -837,11 +837,11 @@ func (t *S3PerformanceTester) RunAllTests() error {
 		throughputPassed:   true,
 	}
 
-	// Run consistency tests first
-	testResults.consistencyPassed = RunConsistencyTests(t)
-
 	// Run connectivity tests
 	testResults.connectivityPassed = t.runConnectivityTests()
+
+	// Run consistency tests first
+	testResults.consistencyPassed = RunConsistencyTests(t)
 
 	// Run latency benchmarks
 	testResults.latencyPassed = t.runLatencyBenchmarks()
@@ -855,16 +855,16 @@ func (t *S3PerformanceTester) RunAllTests() error {
 	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
 
 	// Display results for each test section
-	if testResults.consistencyPassed {
-		fmt.Printf(" CONSISTENCY TESTS %sPASSED%s\n", ColorBrightGreen, ColorReset)
-	} else {
-		fmt.Printf(" CONSISTENCY TESTS %sFAILED%s\n", ColorBrightRed, ColorReset)
-	}
-
 	if testResults.connectivityPassed {
 		fmt.Printf(" CONNECTIVITY TESTS %sPASSED%s\n", ColorBrightGreen, ColorReset)
 	} else {
 		fmt.Printf(" CONNECTIVITY TESTS %sFAILED%s\n", ColorBrightRed, ColorReset)
+	}
+
+	if testResults.consistencyPassed {
+		fmt.Printf(" CONSISTENCY TESTS %sPASSED%s\n", ColorBrightGreen, ColorReset)
+	} else {
+		fmt.Printf(" CONSISTENCY TESTS %sFAILED%s\n", ColorBrightRed, ColorReset)
 	}
 
 	if testResults.latencyPassed {

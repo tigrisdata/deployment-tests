@@ -44,6 +44,59 @@ func (l *silentLogger) Logf(classification logging.Classification, format string
 	// Suppress all AWS SDK log messages
 }
 
+// formatDuration formats a duration with 3 decimal places while keeping natural units
+func formatDuration(d time.Duration) string {
+	if d == 0 {
+		return "0s"
+	}
+
+	// Convert to appropriate unit with 3 decimal places
+	if d >= time.Second {
+		return fmt.Sprintf("%.3fs", d.Seconds())
+	} else if d >= time.Millisecond {
+		return fmt.Sprintf("%.3fms", float64(d.Nanoseconds())/1e6)
+	} else if d >= time.Microsecond {
+		return fmt.Sprintf("%.3fµs", float64(d.Nanoseconds())/1e3)
+	} else {
+		return fmt.Sprintf("%.3fns", float64(d.Nanoseconds()))
+	}
+}
+
+// formatDurationAligned formats a duration with 3 decimal places and consistent alignment
+func formatDurationAligned(d time.Duration) string {
+	if d == 0 {
+		return "     0s"
+	}
+
+	var value float64
+	var unit string
+
+	// Convert to appropriate unit with 3 decimal places
+	if d >= time.Second {
+		value = d.Seconds()
+		unit = "s"
+	} else if d >= time.Millisecond {
+		value = float64(d.Nanoseconds()) / 1e6
+		unit = "ms"
+	} else if d >= time.Microsecond {
+		value = float64(d.Nanoseconds()) / 1e3
+		unit = "µs"
+	} else {
+		value = float64(d.Nanoseconds())
+		unit = "ns"
+	}
+
+	// Format with consistent 10-character width (including unit)
+	formatted := fmt.Sprintf("%.3f%s", value, unit)
+
+	// Pad to exactly 10 characters for perfect alignment
+	if len(formatted) < 10 {
+		return fmt.Sprintf("%10s", formatted)
+	}
+
+	return formatted
+}
+
 // TestConfig holds configuration for the performance test
 type TestConfig struct {
 	BucketName     string
@@ -62,6 +115,7 @@ type TestResult struct {
 	ObjectSize int64
 	Endpoint   string
 	Duration   time.Duration
+	TTFB       time.Duration // Time to first byte (for GET operations)
 	Success    bool
 	Error      error
 	Throughput float64 // bytes per second
@@ -83,6 +137,12 @@ type BenchmarkResult struct {
 	P50Latency   time.Duration
 	P95Latency   time.Duration
 	P99Latency   time.Duration
+	MinTTFB      time.Duration // Min Time to first byte
+	MaxTTFB      time.Duration // Max Time to first byte
+	AvgTTFB      time.Duration // Avg Time to first byte
+	P50TTFB      time.Duration // P50 Time to first byte
+	P95TTFB      time.Duration // P95 Time to first byte
+	P99TTFB      time.Duration // P99 Time to first byte
 	TotalBytes   int64
 	Throughput   float64 // bytes per second
 	OpsPerSecond float64
@@ -245,18 +305,55 @@ func (t *S3PerformanceTester) testGETOperation(endpoint, key string) TestResult 
 		Bucket: aws.String(t.config.BucketName),
 		Key:    aws.String(key),
 	})
-	duration := time.Since(start)
 
+	var ttfb time.Duration
 	var throughput float64
-	if err == nil && resp.ContentLength != nil {
-		throughput = float64(*resp.ContentLength) / duration.Seconds()
+	var objectSize int64
+
+	if err == nil {
+		// TTFB is measured from request start to when we can start reading the response body
+		ttfb = time.Since(start)
+
+		// Stream the body to blackhole while measuring throughput
+		if resp.Body != nil {
+			// Read a small amount first to measure TTFB
+			buffer := make([]byte, 1)
+			_, readErr := resp.Body.Read(buffer)
+			if readErr != nil && readErr != io.EOF {
+				// If we can't read, TTFB is the time to get the response
+				ttfb = time.Since(start)
+			}
+
+			// Stream the entire body to blackhole (discard data)
+			// This is more memory efficient than reading into a buffer
+			bytesRead, readErr := io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+
+			if readErr == nil {
+				objectSize = bytesRead
+			}
+		}
+
+		// Use ContentLength if available and we couldn't read the body
+		if objectSize == 0 && resp.ContentLength != nil {
+			objectSize = *resp.ContentLength
+		}
+
+		// Calculate throughput based on total time
+		totalDuration := time.Since(start)
+		if totalDuration > 0 {
+			throughput = float64(objectSize) / totalDuration.Seconds()
+		}
 	}
+
+	duration := time.Since(start)
 
 	return TestResult{
 		Operation:  "GET",
-		ObjectSize: 0, // Will be set based on actual content length
+		ObjectSize: objectSize,
 		Endpoint:   endpoint,
 		Duration:   duration,
+		TTFB:       ttfb,
 		Success:    err == nil,
 		Error:      err,
 		Throughput: throughput,
@@ -387,12 +484,16 @@ func (t *S3PerformanceTester) calculateBenchmarkStats(operation string, objectSi
 	// Separate successful and failed operations
 	var successResults []TestResult
 	var durations []time.Duration
+	var ttfbDurations []time.Duration
 	var totalBytes int64
 
 	for _, result := range results {
 		if result.Success {
 			successResults = append(successResults, result)
 			durations = append(durations, result.Duration)
+			if result.TTFB > 0 {
+				ttfbDurations = append(ttfbDurations, result.TTFB)
+			}
 			totalBytes += result.ObjectSize
 		}
 	}
@@ -444,6 +545,37 @@ func (t *S3PerformanceTester) calculateBenchmarkStats(operation string, objectSi
 		p99Latency = durations[len(durations)-1]
 	}
 
+	// Calculate TTFB statistics (only for GET operations)
+	var minTTFB, maxTTFB, avgTTFB, p50TTFB, p95TTFB, p99TTFB time.Duration
+	if len(ttfbDurations) > 0 {
+		// Sort TTFB durations for percentile calculations
+		sort.Slice(ttfbDurations, func(i, j int) bool {
+			return ttfbDurations[i] < ttfbDurations[j]
+		})
+
+		minTTFB = ttfbDurations[0]
+		maxTTFB = ttfbDurations[len(ttfbDurations)-1]
+
+		var totalTTFB time.Duration
+		for _, d := range ttfbDurations {
+			totalTTFB += d
+		}
+		avgTTFB = totalTTFB / time.Duration(len(ttfbDurations))
+
+		// Calculate TTFB percentiles
+		p50TTFBIndex := int(float64(len(ttfbDurations)) * 0.5)
+		p95TTFBIndex := int(float64(len(ttfbDurations)) * 0.95)
+		p99TTFBIndex := int(float64(len(ttfbDurations)) * 0.99)
+
+		p50TTFB = ttfbDurations[p50TTFBIndex]
+		p95TTFB = ttfbDurations[p95TTFBIndex]
+		if p99TTFBIndex < len(ttfbDurations) {
+			p99TTFB = ttfbDurations[p99TTFBIndex]
+		} else {
+			p99TTFB = ttfbDurations[len(ttfbDurations)-1]
+		}
+	}
+
 	// Calculate throughput
 	testDuration := t.config.TestDuration
 	if testDuration == 0 {
@@ -468,6 +600,12 @@ func (t *S3PerformanceTester) calculateBenchmarkStats(operation string, objectSi
 		P50Latency:   p50Latency,
 		P95Latency:   p95Latency,
 		P99Latency:   p99Latency,
+		MinTTFB:      minTTFB,
+		MaxTTFB:      maxTTFB,
+		AvgTTFB:      avgTTFB,
+		P50TTFB:      p50TTFB,
+		P95TTFB:      p95TTFB,
+		P99TTFB:      p99TTFB,
 		TotalBytes:   totalBytes,
 		Throughput:   throughput,
 		OpsPerSecond: opsPerSecond,
@@ -489,7 +627,7 @@ func (t *S3PerformanceTester) runConnectivityTests() {
 		if err != nil {
 			fmt.Printf("  Health Check: %sFAILED%s - %v\n", ColorBrightRed, ColorReset, err)
 		} else {
-			fmt.Printf("  Health Check: %sSUCCESS%s - %v\n", ColorBrightGreen, ColorReset, healthDuration)
+			fmt.Printf("  Health Check: %sSUCCESS%s - %s\n", ColorBrightGreen, ColorReset, formatDuration(healthDuration))
 		}
 
 		// S3 connectivity test
@@ -497,7 +635,7 @@ func (t *S3PerformanceTester) runConnectivityTests() {
 		if err != nil {
 			fmt.Printf("  S3 Connectivity: %sFAILED%s - %v\n", ColorBrightRed, ColorReset, err)
 		} else {
-			fmt.Printf("  S3 Connectivity: %sSUCCESS%s - %v\n", ColorBrightGreen, ColorReset, s3Duration)
+			fmt.Printf("  S3 Connectivity: %sSUCCESS%s - %s\n", ColorBrightGreen, ColorReset, formatDuration(s3Duration))
 		}
 	}
 
@@ -510,7 +648,7 @@ func (t *S3PerformanceTester) runConnectivityTests() {
 		if err != nil {
 			fmt.Printf("  Health Check: %sFAILED%s - %v\n", ColorBrightRed, ColorReset, err)
 		} else {
-			fmt.Printf("  Health Check: %sSUCCESS%s - %v\n", ColorBrightGreen, ColorReset, healthDuration)
+			fmt.Printf("  Health Check: %sSUCCESS%s - %s\n", ColorBrightGreen, ColorReset, formatDuration(healthDuration))
 		}
 
 		// S3 connectivity test
@@ -518,7 +656,7 @@ func (t *S3PerformanceTester) runConnectivityTests() {
 		if err != nil {
 			fmt.Printf("  S3 Connectivity: %sFAILED%s - %v\n", ColorBrightRed, ColorReset, err)
 		} else {
-			fmt.Printf("  S3 Connectivity: %sSUCCESS%s - %v\n", ColorBrightGreen, ColorReset, s3Duration)
+			fmt.Printf("  S3 Connectivity: %sSUCCESS%s - %s\n", ColorBrightGreen, ColorReset, formatDuration(s3Duration))
 		}
 	}
 }
@@ -548,12 +686,16 @@ func (t *S3PerformanceTester) runLatencyBenchmarks() {
 			fmt.Printf("  Testing %d bytes (%d objects)...", size, count)
 			result := t.runLatencyBenchmark("PUT", size, count, endpoint)
 			if result.ErrorOps > 0 {
-				fmt.Printf(" Avg: %v, P95: %v, P99: %v (%s%d success, %s%d failed%s)\n",
-					result.AvgLatency, result.P95Latency, result.P99Latency,
+				fmt.Printf(" %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s (%s%d success, %s%d failed%s)\n",
+					ColorBrightWhite, ColorReset, formatDurationAligned(result.AvgLatency),
+					ColorBrightWhite, ColorReset, formatDurationAligned(result.P95Latency),
+					ColorBrightWhite, ColorReset, formatDurationAligned(result.P99Latency),
 					ColorBrightGreen, result.SuccessOps, ColorBrightRed, result.ErrorOps, ColorReset)
 			} else {
-				fmt.Printf(" Avg: %v, P95: %v, P99: %v (%s%d success%s)\n",
-					result.AvgLatency, result.P95Latency, result.P99Latency,
+				fmt.Printf(" %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s (%s%d success%s)\n",
+					ColorBrightWhite, ColorReset, formatDurationAligned(result.AvgLatency),
+					ColorBrightWhite, ColorReset, formatDurationAligned(result.P95Latency),
+					ColorBrightWhite, ColorReset, formatDurationAligned(result.P99Latency),
 					ColorBrightGreen, result.SuccessOps, ColorReset)
 			}
 		}
@@ -566,12 +708,22 @@ func (t *S3PerformanceTester) runLatencyBenchmarks() {
 			// Reuse objects created by PUT tests
 			result := t.runLatencyBenchmark("GET", size, count, endpoint)
 			if result.ErrorOps > 0 {
-				fmt.Printf(" Avg: %v, P95: %v, P99: %v (%s%d success, %s%d failed%s)\n",
-					result.AvgLatency, result.P95Latency, result.P99Latency,
+				fmt.Printf(" %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s | %sTTFB Avg:%s %s, %sP95:%s %s, %sP99:%s %s (%s%d success, %s%d failed%s)\n",
+					ColorBrightWhite, ColorReset, formatDurationAligned(result.AvgLatency),
+					ColorBrightWhite, ColorReset, formatDurationAligned(result.P95Latency),
+					ColorBrightWhite, ColorReset, formatDurationAligned(result.P99Latency),
+					ColorBrightWhite, ColorReset, formatDurationAligned(result.AvgTTFB),
+					ColorBrightWhite, ColorReset, formatDurationAligned(result.P95TTFB),
+					ColorBrightWhite, ColorReset, formatDurationAligned(result.P99TTFB),
 					ColorBrightGreen, result.SuccessOps, ColorBrightRed, result.ErrorOps, ColorReset)
 			} else {
-				fmt.Printf(" Avg: %v, P95: %v, P99: %v (%s%d success%s)\n",
-					result.AvgLatency, result.P95Latency, result.P99Latency,
+				fmt.Printf(" %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s | %sTTFB Avg:%s %s, %sP95:%s %s, %sP99:%s %s (%s%d success%s)\n",
+					ColorBrightWhite, ColorReset, formatDurationAligned(result.AvgLatency),
+					ColorBrightWhite, ColorReset, formatDurationAligned(result.P95Latency),
+					ColorBrightWhite, ColorReset, formatDurationAligned(result.P99Latency),
+					ColorBrightWhite, ColorReset, formatDurationAligned(result.AvgTTFB),
+					ColorBrightWhite, ColorReset, formatDurationAligned(result.P95TTFB),
+					ColorBrightWhite, ColorReset, formatDurationAligned(result.P99TTFB),
 					ColorBrightGreen, result.SuccessOps, ColorReset)
 			}
 		}
@@ -604,12 +756,14 @@ func (t *S3PerformanceTester) runThroughputBenchmarks() {
 			result := t.runThroughputBenchmark("PUT", size, count, endpoint)
 			if result.SuccessOps > 0 {
 				if result.ErrorOps > 0 {
-					fmt.Printf(" %.2f MB/s, %.2f ops/s (%s%d success, %s%d failed%s)\n",
-						result.Throughput/(1024*1024), result.OpsPerSecond,
+					fmt.Printf(" %sMB/s:%s %8.3f, %sops/s:%s %8.3f (%s%d success, %s%d failed%s)\n",
+						ColorBrightWhite, ColorReset, result.Throughput/(1024*1024),
+						ColorBrightWhite, ColorReset, result.OpsPerSecond,
 						ColorBrightGreen, result.SuccessOps, ColorBrightRed, result.ErrorOps, ColorReset)
 				} else {
-					fmt.Printf(" %.2f MB/s, %.2f ops/s (%s%d success%s)\n",
-						result.Throughput/(1024*1024), result.OpsPerSecond,
+					fmt.Printf(" %sMB/s:%s %8.3f, %sops/s:%s %8.3f (%s%d success%s)\n",
+						ColorBrightWhite, ColorReset, result.Throughput/(1024*1024),
+						ColorBrightWhite, ColorReset, result.OpsPerSecond,
 						ColorBrightGreen, result.SuccessOps, ColorReset)
 				}
 			} else {
@@ -626,12 +780,14 @@ func (t *S3PerformanceTester) runThroughputBenchmarks() {
 			result := t.runThroughputBenchmark("GET", size, count, endpoint)
 			if result.SuccessOps > 0 {
 				if result.ErrorOps > 0 {
-					fmt.Printf(" %.2f MB/s, %.2f ops/s (%s%d success, %s%d failed%s)\n",
-						result.Throughput/(1024*1024), result.OpsPerSecond,
+					fmt.Printf(" %sMB/s:%s %8.3f, %sops/s:%s %8.3f (%s%d success, %s%d failed%s)\n",
+						ColorBrightWhite, ColorReset, result.Throughput/(1024*1024),
+						ColorBrightWhite, ColorReset, result.OpsPerSecond,
 						ColorBrightGreen, result.SuccessOps, ColorBrightRed, result.ErrorOps, ColorReset)
 				} else {
-					fmt.Printf(" %.2f MB/s, %.2f ops/s (%s%d success%s)\n",
-						result.Throughput/(1024*1024), result.OpsPerSecond,
+					fmt.Printf(" %sMB/s:%s %8.3f, %sops/s:%s %8.3f (%s%d success%s)\n",
+						ColorBrightWhite, ColorReset, result.Throughput/(1024*1024),
+						ColorBrightWhite, ColorReset, result.OpsPerSecond,
 						ColorBrightGreen, result.SuccessOps, ColorReset)
 				}
 			} else {

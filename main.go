@@ -99,14 +99,18 @@ func formatDurationAligned(d time.Duration) string {
 
 // TestConfig holds configuration for the performance test
 type TestConfig struct {
-	BucketName     string
-	ObjectSizes    []int64
-	ObjectCounts   []int
-	Concurrency    int
-	TestDuration   time.Duration
-	Prefix         string
-	GlobalEndpoint string
-	USEndpoints    []string
+	BucketName      string
+	ObjectSizes     []int64
+	ObjectCounts    []int
+	Concurrency     int
+	TestDuration    time.Duration
+	Prefix          string
+	GlobalEndpoint  string
+	USEndpoints     []string
+	RunConnectivity bool
+	RunConsistency  bool
+	RunLatency      bool
+	RunThroughput   bool
 }
 
 // TestResult holds individual test results
@@ -830,53 +834,81 @@ func (t *S3PerformanceTester) RunAllTests() error {
 		connectivityPassed bool
 		latencyPassed      bool
 		throughputPassed   bool
+		ranTests           bool
 	}{
 		consistencyPassed:  true,
 		connectivityPassed: true,
 		latencyPassed:      true,
 		throughputPassed:   true,
+		ranTests:           false,
 	}
 
 	// Run connectivity tests
-	testResults.connectivityPassed = t.runConnectivityTests()
+	if t.config.RunConnectivity {
+		testResults.connectivityPassed = t.runConnectivityTests()
+		testResults.ranTests = true
+	}
 
 	// Run consistency tests first
-	testResults.consistencyPassed = RunConsistencyTests(t)
+	if t.config.RunConsistency {
+		testResults.consistencyPassed = RunConsistencyTests(t)
+		testResults.ranTests = true
+	}
 
 	// Run latency benchmarks
-	testResults.latencyPassed = t.runLatencyBenchmarks()
+	if t.config.RunLatency {
+		testResults.latencyPassed = t.runLatencyBenchmarks()
+		testResults.ranTests = true
+	}
 
 	// Run throughput benchmarks
-	testResults.throughputPassed = t.runThroughputBenchmarks()
-
-	// Display test summary
-	fmt.Printf("\n%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
-	fmt.Println(" TEST SUMMARY")
-	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
-
-	// Display results for each test section
-	if testResults.connectivityPassed {
-		fmt.Printf(" CONNECTIVITY TESTS %sPASSED%s\n", ColorBrightGreen, ColorReset)
-	} else {
-		fmt.Printf(" CONNECTIVITY TESTS %sFAILED%s\n", ColorBrightRed, ColorReset)
+	if t.config.RunThroughput {
+		testResults.throughputPassed = t.runThroughputBenchmarks()
+		testResults.ranTests = true
 	}
 
-	if testResults.consistencyPassed {
-		fmt.Printf(" CONSISTENCY TESTS %sPASSED%s\n", ColorBrightGreen, ColorReset)
-	} else {
-		fmt.Printf(" CONSISTENCY TESTS %sFAILED%s\n", ColorBrightRed, ColorReset)
-	}
+	// Display test summary if any tests were run
+	if testResults.ranTests {
+		fmt.Printf("\n%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
+		fmt.Println(" TEST SUMMARY")
+		fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
 
-	if testResults.latencyPassed {
-		fmt.Printf(" LATENCY BENCHMARKS %sPASSED%s\n", ColorBrightGreen, ColorReset)
-	} else {
-		fmt.Printf(" LATENCY BENCHMARKS %sFAILED%s\n", ColorBrightRed, ColorReset)
-	}
+		// Display results for each test section that was run
+		if t.config.RunConnectivity {
+			if testResults.connectivityPassed {
+				fmt.Printf(" CONNECTIVITY TESTS %sPASSED%s\n", ColorBrightGreen, ColorReset)
+			} else {
+				fmt.Printf(" CONNECTIVITY TESTS %sFAILED%s\n", ColorBrightRed, ColorReset)
+			}
+		}
 
-	if testResults.throughputPassed {
-		fmt.Printf(" THROUGHPUT BENCHMARKS %sPASSED%s\n", ColorBrightGreen, ColorReset)
+		if t.config.RunConsistency {
+			if testResults.consistencyPassed {
+				fmt.Printf(" CONSISTENCY TESTS %sPASSED%s\n", ColorBrightGreen, ColorReset)
+			} else {
+				fmt.Printf(" CONSISTENCY TESTS %sFAILED%s\n", ColorBrightRed, ColorReset)
+			}
+		}
+
+		if t.config.RunLatency {
+			if testResults.latencyPassed {
+				fmt.Printf(" LATENCY BENCHMARKS %sPASSED%s\n", ColorBrightGreen, ColorReset)
+			} else {
+				fmt.Printf(" LATENCY BENCHMARKS %sFAILED%s\n", ColorBrightRed, ColorReset)
+			}
+		}
+
+		if t.config.RunThroughput {
+			if testResults.throughputPassed {
+				fmt.Printf(" THROUGHPUT BENCHMARKS %sPASSED%s\n", ColorBrightGreen, ColorReset)
+			} else {
+				fmt.Printf(" THROUGHPUT BENCHMARKS %sFAILED%s\n", ColorBrightRed, ColorReset)
+			}
+		}
 	} else {
-		fmt.Printf(" THROUGHPUT BENCHMARKS %sFAILED%s\n", ColorBrightRed, ColorReset)
+		fmt.Printf("\n%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
+		fmt.Printf(" %sNO TESTS RUN%s - All test flags were set to false\n", ColorBrightRed, ColorReset)
+		fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
 	}
 
 	fmt.Printf("\n%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
@@ -895,6 +927,9 @@ func main() {
 		prefix         = flag.String("prefix", "perf-test", "S3 key prefix")
 		globalEndpoint = flag.String("global-endpoint", "", "Global S3 endpoint URL")
 		usEndpoints    = flag.String("us-endpoints", "", "Comma-separated list of US regional endpoints")
+
+		// Test selection flag
+		tests = flag.String("tests", "all", "Comma-separated list of tests to run: connectivity,consistency,latency,throughput (default: all)")
 	)
 	flag.Parse()
 
@@ -910,6 +945,37 @@ func main() {
 		usEndpointList = strings.Split(*usEndpoints, ",")
 		for i, endpoint := range usEndpointList {
 			usEndpointList[i] = strings.TrimSpace(endpoint)
+		}
+	}
+
+	// Parse test selection
+	testList := strings.ToLower(strings.TrimSpace(*tests))
+	runConnectivity := false
+	runConsistency := false
+	runLatency := false
+	runThroughput := false
+
+	if testList == "all" || testList == "" {
+		runConnectivity = true
+		runConsistency = true
+		runLatency = true
+		runThroughput = true
+	} else {
+		selectedTests := strings.Split(testList, ",")
+		for _, test := range selectedTests {
+			test = strings.TrimSpace(test)
+			switch test {
+			case "connectivity":
+				runConnectivity = true
+			case "consistency":
+				runConsistency = true
+			case "latency":
+				runLatency = true
+			case "throughput":
+				runThroughput = true
+			default:
+				fmt.Fprintf(os.Stderr, "Warning: unknown test '%s' ignored. Valid tests: connectivity, consistency, latency, throughput\n", test)
+			}
 		}
 	}
 
@@ -929,14 +995,18 @@ func main() {
 
 	// Create test configuration
 	config := TestConfig{
-		BucketName:     *bucketName,
-		ObjectSizes:    objectSizes,
-		ObjectCounts:   objectCounts,
-		Concurrency:    *concurrency,
-		TestDuration:   *testDuration,
-		Prefix:         *prefix,
-		GlobalEndpoint: *globalEndpoint,
-		USEndpoints:    usEndpointList,
+		BucketName:      *bucketName,
+		ObjectSizes:     objectSizes,
+		ObjectCounts:    objectCounts,
+		Concurrency:     *concurrency,
+		TestDuration:    *testDuration,
+		Prefix:          *prefix,
+		GlobalEndpoint:  *globalEndpoint,
+		USEndpoints:     usEndpointList,
+		RunConnectivity: runConnectivity,
+		RunConsistency:  runConsistency,
+		RunLatency:      runLatency,
+		RunThroughput:   runThroughput,
 	}
 
 	// Create performance tester

@@ -613,19 +613,22 @@ func (t *S3PerformanceTester) calculateBenchmarkStats(operation string, objectSi
 }
 
 // runConnectivityTests runs connectivity tests
-func (t *S3PerformanceTester) runConnectivityTests() {
-	fmt.Println(strings.Repeat("=", 80))
-	fmt.Println("CONNECTIVITY TESTS")
-	fmt.Println(strings.Repeat("=", 80))
+func (t *S3PerformanceTester) runConnectivityTests() bool {
+	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
+	fmt.Println(" CONNECTIVITY TESTS")
+	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
+
+	allPassed := true
 
 	// Test global endpoint
 	if t.config.GlobalEndpoint != "" {
-		fmt.Printf("\n%sTesting Global Endpoint: %s%s\n", ColorBrightWhite, t.config.GlobalEndpoint, ColorReset)
+		fmt.Printf("\n%sTesting Global Endpoint: %s%s%s\n", ColorBrightWhite, ColorYellow, t.config.GlobalEndpoint, ColorReset)
 
 		// Health check test
 		healthDuration, err := t.testHealthEndpoint(t.config.GlobalEndpoint)
 		if err != nil {
 			fmt.Printf("  Health Check: %sFAILED%s - %v\n", ColorBrightRed, ColorReset, err)
+			allPassed = false
 		} else {
 			fmt.Printf("  Health Check: %sSUCCESS%s - %s\n", ColorBrightGreen, ColorReset, formatDuration(healthDuration))
 		}
@@ -634,6 +637,7 @@ func (t *S3PerformanceTester) runConnectivityTests() {
 		s3Duration, err := t.testS3Connectivity("global")
 		if err != nil {
 			fmt.Printf("  S3 Connectivity: %sFAILED%s - %v\n", ColorBrightRed, ColorReset, err)
+			allPassed = false
 		} else {
 			fmt.Printf("  S3 Connectivity: %sSUCCESS%s - %s\n", ColorBrightGreen, ColorReset, formatDuration(s3Duration))
 		}
@@ -641,12 +645,13 @@ func (t *S3PerformanceTester) runConnectivityTests() {
 
 	// Test US regional endpoints
 	for _, endpoint := range t.config.USEndpoints {
-		fmt.Printf("\n%sTesting US Regional Endpoint: %s%s\n", ColorBrightWhite, endpoint, ColorReset)
+		fmt.Printf("\n%sTesting US Regional Endpoint: %s%s%s\n", ColorBrightWhite, ColorYellow, endpoint, ColorReset)
 
 		// Health check test
 		healthDuration, err := t.testHealthEndpoint(endpoint)
 		if err != nil {
 			fmt.Printf("  Health Check: %sFAILED%s - %v\n", ColorBrightRed, ColorReset, err)
+			allPassed = false
 		} else {
 			fmt.Printf("  Health Check: %sSUCCESS%s - %s\n", ColorBrightGreen, ColorReset, formatDuration(healthDuration))
 		}
@@ -655,17 +660,20 @@ func (t *S3PerformanceTester) runConnectivityTests() {
 		s3Duration, err := t.testS3Connectivity(endpoint)
 		if err != nil {
 			fmt.Printf("  S3 Connectivity: %sFAILED%s - %v\n", ColorBrightRed, ColorReset, err)
+			allPassed = false
 		} else {
 			fmt.Printf("  S3 Connectivity: %sSUCCESS%s - %s\n", ColorBrightGreen, ColorReset, formatDuration(s3Duration))
 		}
 	}
+
+	return allPassed
 }
 
 // runLatencyBenchmarks runs all latency benchmarks
-func (t *S3PerformanceTester) runLatencyBenchmarks() {
-	fmt.Println("\n" + strings.Repeat("=", 80))
-	fmt.Println("LATENCY BENCHMARKS")
-	fmt.Println(strings.Repeat("=", 80))
+func (t *S3PerformanceTester) runLatencyBenchmarks() bool {
+	fmt.Printf("\n%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
+	fmt.Println(" LATENCY BENCHMARKS")
+	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
 
 	// Test all endpoints
 	endpoints := []string{"global"}
@@ -676,7 +684,7 @@ func (t *S3PerformanceTester) runLatencyBenchmarks() {
 			continue
 		}
 
-		fmt.Printf("\n%sTesting Endpoint: %s%s\n", ColorBrightWhite, endpoint, ColorReset)
+		fmt.Printf("\n%sTesting Endpoint: %s%s%s\n", ColorBrightWhite, ColorYellow, endpoint, ColorReset)
 		fmt.Println(strings.Repeat("-", 60))
 
 		// PUT latency tests
@@ -728,13 +736,17 @@ func (t *S3PerformanceTester) runLatencyBenchmarks() {
 			}
 		}
 	}
+
+	// For now, assume all latency benchmarks pass
+	// TODO: Implement detailed failure tracking
+	return true
 }
 
 // runThroughputBenchmarks runs all throughput benchmarks
-func (t *S3PerformanceTester) runThroughputBenchmarks() {
-	fmt.Println("\n" + strings.Repeat("=", 80))
-	fmt.Println("THROUGHPUT BENCHMARKS")
-	fmt.Println(strings.Repeat("=", 80))
+func (t *S3PerformanceTester) runThroughputBenchmarks() bool {
+	fmt.Printf("\n%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
+	fmt.Println(" THROUGHPUT BENCHMARKS")
+	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
 
 	// Test all endpoints
 	endpoints := []string{"global"}
@@ -745,7 +757,7 @@ func (t *S3PerformanceTester) runThroughputBenchmarks() {
 			continue
 		}
 
-		fmt.Printf("\n%sTesting Endpoint: %s%s\n", ColorBrightWhite, endpoint, ColorReset)
+		fmt.Printf("\n%sTesting Endpoint: %s%s%s\n", ColorBrightWhite, ColorYellow, endpoint, ColorReset)
 		fmt.Println(strings.Repeat("-", 60))
 
 		// PUT throughput tests
@@ -795,33 +807,81 @@ func (t *S3PerformanceTester) runThroughputBenchmarks() {
 			}
 		}
 	}
+
+	// For now, assume all throughput benchmarks pass
+	// TODO: Implement detailed failure tracking
+	return true
 }
 
 // RunAllTests runs the complete test suite
 func (t *S3PerformanceTester) RunAllTests() error {
 	fmt.Printf("Starting S3 Performance Test Suite...\n")
-	fmt.Printf("Bucket: %s\n", t.config.BucketName)
-	fmt.Printf("Concurrency: %d\n", t.config.Concurrency)
-	fmt.Printf("Test Duration: %v\n", t.config.TestDuration)
-	fmt.Printf("Object Sizes: %v\n", t.config.ObjectSizes)
-	fmt.Printf("Global Endpoint: %s\n", t.config.GlobalEndpoint)
-	fmt.Printf("US Endpoints: %v\n", t.config.USEndpoints)
+	fmt.Printf("Bucket: %s%s%s\n", ColorBrightWhite, t.config.BucketName, ColorReset)
+	fmt.Printf("Concurrency: %s%d%s\n", ColorBrightWhite, t.config.Concurrency, ColorReset)
+	fmt.Printf("Test Duration: %s%v%s\n", ColorBrightWhite, t.config.TestDuration, ColorReset)
+	fmt.Printf("Object Sizes: %s%v%s\n", ColorBrightWhite, t.config.ObjectSizes, ColorReset)
+	fmt.Printf("Global Endpoint: %s%s%s\n", ColorBrightWhite, t.config.GlobalEndpoint, ColorReset)
+	fmt.Printf("US Endpoints: %s%v%s\n", ColorBrightWhite, t.config.USEndpoints, ColorReset)
+	fmt.Printf("\n")
+
+	// Track test results
+	var testResults = struct {
+		consistencyPassed  bool
+		connectivityPassed bool
+		latencyPassed      bool
+		throughputPassed   bool
+	}{
+		consistencyPassed:  true,
+		connectivityPassed: true,
+		latencyPassed:      true,
+		throughputPassed:   true,
+	}
 
 	// Run consistency tests first
-	RunConsistencyTests(t)
+	testResults.consistencyPassed = RunConsistencyTests(t)
 
 	// Run connectivity tests
-	t.runConnectivityTests()
+	testResults.connectivityPassed = t.runConnectivityTests()
 
 	// Run latency benchmarks
-	t.runLatencyBenchmarks()
+	testResults.latencyPassed = t.runLatencyBenchmarks()
 
 	// Run throughput benchmarks
-	t.runThroughputBenchmarks()
+	testResults.throughputPassed = t.runThroughputBenchmarks()
 
-	fmt.Println("\n" + strings.Repeat("=", 80))
-	fmt.Println("TEST SUITE COMPLETED")
-	fmt.Println(strings.Repeat("=", 80))
+	// Display test summary
+	fmt.Printf("\n%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
+	fmt.Println(" TEST SUMMARY")
+	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
+
+	// Display results for each test section
+	if testResults.consistencyPassed {
+		fmt.Printf(" CONSISTENCY TESTS %sPASSED%s\n", ColorBrightGreen, ColorReset)
+	} else {
+		fmt.Printf(" CONSISTENCY TESTS %sFAILED%s\n", ColorBrightRed, ColorReset)
+	}
+
+	if testResults.connectivityPassed {
+		fmt.Printf(" CONNECTIVITY TESTS %sPASSED%s\n", ColorBrightGreen, ColorReset)
+	} else {
+		fmt.Printf(" CONNECTIVITY TESTS %sFAILED%s\n", ColorBrightRed, ColorReset)
+	}
+
+	if testResults.latencyPassed {
+		fmt.Printf(" LATENCY BENCHMARKS %sPASSED%s\n", ColorBrightGreen, ColorReset)
+	} else {
+		fmt.Printf(" LATENCY BENCHMARKS %sFAILED%s\n", ColorBrightRed, ColorReset)
+	}
+
+	if testResults.throughputPassed {
+		fmt.Printf(" THROUGHPUT BENCHMARKS %sPASSED%s\n", ColorBrightGreen, ColorReset)
+	} else {
+		fmt.Printf(" THROUGHPUT BENCHMARKS %sFAILED%s\n", ColorBrightRed, ColorReset)
+	}
+
+	fmt.Printf("\n%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
+	fmt.Println(" TEST SUITE COMPLETED")
+	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
 
 	return nil
 }

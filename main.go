@@ -162,9 +162,24 @@ type S3PerformanceTester struct {
 
 // NewS3PerformanceTester creates a new S3 performance tester
 func NewS3PerformanceTester(cfg TestConfig) (*S3PerformanceTester, error) {
+	// Create optimized HTTP client for high-throughput scenarios
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			MaxIdleConns:        1000,             // Increased from default 100
+			MaxIdleConnsPerHost: 200,              // Increased from default 2
+			MaxConnsPerHost:     0,                // Unlimited
+			IdleConnTimeout:     90 * time.Second, // Keep connections alive longer
+			DisableCompression:  true,             // Disable compression for raw throughput
+			WriteBufferSize:     256 * 1024,       // 256KB write buffer
+			ReadBufferSize:      256 * 1024,       // 256KB read buffer
+		},
+		Timeout: 5 * time.Minute, // Generous timeout for large objects
+	}
+
 	// Load AWS configuration (region will be automatically detected)
 	awsCfg, err := config.LoadDefaultConfig(context.TODO(),
 		config.WithLogger(&silentLogger{}),
+		config.WithHTTPClient(httpClient),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
@@ -413,14 +428,21 @@ func (t *S3PerformanceTester) runLatencyBenchmark(operation string, objectSize i
 	return t.calculateBenchmarkStats(operation, objectSize, endpoint, results)
 }
 
+// workerStats holds per-worker statistics to avoid lock contention
+type workerStats struct {
+	successOps    int64
+	errorOps      int64
+	totalBytes    int64
+	minDuration   int64 // nanoseconds
+	maxDuration   int64 // nanoseconds
+	totalDuration int64 // nanoseconds
+	durations     []time.Duration
+}
+
 // runThroughputBenchmark runs throughput benchmark for a specific operation and size
 func (t *S3PerformanceTester) runThroughputBenchmark(operation string, objectSize int64, objectCount int, endpoint string) BenchmarkResult {
-	var results []TestResult
 	var wg sync.WaitGroup
-	var mu sync.Mutex
 
-	// Generate test data
-	data := t.generateRandomData(objectSize)
 	// Use PUT prefix for both PUT and GET operations so GET can reuse PUT objects
 	keyPrefix := fmt.Sprintf("%s/throughput-PUT-%d", t.config.Prefix, objectSize)
 
@@ -428,18 +450,44 @@ func (t *S3PerformanceTester) runThroughputBenchmark(operation string, objectSiz
 	ctx, cancel := context.WithTimeout(context.Background(), t.config.TestDuration)
 	defer cancel()
 
+	// Per-worker statistics to avoid lock contention
+	workerStatsList := make([]*workerStats, t.config.Concurrency)
+	for i := 0; i < t.config.Concurrency; i++ {
+		workerStatsList[i] = &workerStats{
+			minDuration: int64(^uint64(0) >> 1),          // Max int64
+			durations:   make([]time.Duration, 0, 10000), // Pre-allocate
+		}
+	}
+
+	// Start time for throughput calculation
+	testStart := time.Now()
+
 	// Start workers
 	for i := 0; i < t.config.Concurrency; i++ {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
 
+			// Get worker-specific stats
+			stats := workerStatsList[workerID]
+
+			// Per-worker data buffer to avoid contention
+			var data []byte
+			if operation == "PUT" {
+				data = t.generateRandomData(objectSize)
+			}
+
 			keyCounter := 0
+			checkInterval := 100 // Check context every 100 operations
+
 			for {
-				select {
-				case <-ctx.Done():
-					return
-				default:
+				// Batch context cancellation checks for better performance
+				if keyCounter%checkInterval == 0 {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
 				}
 
 				// Cycle through available objects (modulo to reuse objects)
@@ -451,26 +499,151 @@ func (t *S3PerformanceTester) runThroughputBenchmark(operation string, objectSiz
 				key := fmt.Sprintf("%s/worker-%d/obj-%d", keyPrefix, workerID, objID)
 				keyCounter++
 
-				var result TestResult
-				if operation == "PUT" {
-					result = t.testPUTOperation(endpoint, key, data)
-				} else if operation == "GET" {
-					result = t.testGETOperation(endpoint, key)
+				// Perform operation
+				start := time.Now()
+				var err error
+				var bytesTransferred int64 = objectSize
+
+				switch operation {
+				case "PUT":
+					client := t.clients[endpoint]
+					_, err = client.PutObject(ctx, &s3.PutObjectInput{
+						Bucket: aws.String(t.config.BucketName),
+						Key:    aws.String(key),
+						Body:   bytes.NewReader(data),
+					})
+				case "GET":
+					client := t.clients[endpoint]
+					resp, getErr := client.GetObject(ctx, &s3.GetObjectInput{
+						Bucket: aws.String(t.config.BucketName),
+						Key:    aws.String(key),
+					})
+					err = getErr
+					if err == nil && resp.Body != nil {
+						bytesTransferred, _ = io.Copy(io.Discard, resp.Body)
+						resp.Body.Close()
+					}
 				}
 
-				result.ObjectSize = objectSize
+				duration := time.Since(start)
+				durationNanos := duration.Nanoseconds()
 
-				mu.Lock()
-				results = append(results, result)
-				mu.Unlock()
+				// Update worker-local statistics (no locks needed)
+				if err == nil {
+					stats.successOps++
+					stats.totalBytes += bytesTransferred
+					stats.totalDuration += durationNanos
+
+					// Update min/max
+					if durationNanos < stats.minDuration {
+						stats.minDuration = durationNanos
+					}
+					if durationNanos > stats.maxDuration {
+						stats.maxDuration = durationNanos
+					}
+
+					// Store duration for percentile calculation
+					stats.durations = append(stats.durations, duration)
+				} else {
+					stats.errorOps++
+				}
 			}
 		}(i)
 	}
 
 	wg.Wait()
+	testDuration := time.Since(testStart)
 
-	// Calculate statistics
-	return t.calculateBenchmarkStats(operation, objectSize, endpoint, results)
+	// Aggregate statistics from all workers
+	return t.aggregateWorkerStats(operation, objectSize, endpoint, workerStatsList, testDuration)
+}
+
+// aggregateWorkerStats aggregates statistics from all workers
+func (t *S3PerformanceTester) aggregateWorkerStats(operation string, objectSize int64, endpoint string, workerStatsList []*workerStats, testDuration time.Duration) BenchmarkResult {
+	// Aggregate stats from all workers
+	var totalSuccessOps, totalErrorOps, totalBytes int64
+	var minDuration int64 = int64(^uint64(0) >> 1) // Max int64
+	var maxDuration int64
+	var allDurations []time.Duration
+
+	for _, stats := range workerStatsList {
+		totalSuccessOps += stats.successOps
+		totalErrorOps += stats.errorOps
+		totalBytes += stats.totalBytes
+
+		if stats.successOps > 0 {
+			if stats.minDuration < minDuration {
+				minDuration = stats.minDuration
+			}
+			if stats.maxDuration > maxDuration {
+				maxDuration = stats.maxDuration
+			}
+			allDurations = append(allDurations, stats.durations...)
+		}
+	}
+
+	if totalSuccessOps == 0 {
+		return BenchmarkResult{
+			TestType:    "throughput",
+			Operation:   operation,
+			ObjectSize:  objectSize,
+			Endpoint:    endpoint,
+			Concurrency: t.config.Concurrency,
+			TotalOps:    totalSuccessOps + totalErrorOps,
+			SuccessOps:  0,
+			ErrorOps:    totalErrorOps,
+		}
+	}
+
+	// Sort durations for percentile calculations
+	sort.Slice(allDurations, func(i, j int) bool {
+		return allDurations[i] < allDurations[j]
+	})
+
+	// Calculate average
+	var totalDuration time.Duration
+	for _, d := range allDurations {
+		totalDuration += d
+	}
+	avgLatency := totalDuration / time.Duration(len(allDurations))
+
+	// Calculate percentiles
+	p50Index := int(float64(len(allDurations)) * 0.5)
+	p95Index := int(float64(len(allDurations)) * 0.95)
+	p99Index := int(float64(len(allDurations)) * 0.99)
+
+	p50Latency := allDurations[p50Index]
+	p95Latency := allDurations[p95Index]
+	var p99Latency time.Duration
+	if p99Index < len(allDurations) {
+		p99Latency = allDurations[p99Index]
+	} else {
+		p99Latency = allDurations[len(allDurations)-1]
+	}
+
+	// Calculate throughput based on actual test duration
+	throughput := float64(totalBytes) / testDuration.Seconds()
+	opsPerSecond := float64(totalSuccessOps) / testDuration.Seconds()
+
+	return BenchmarkResult{
+		TestType:     "throughput",
+		Operation:    operation,
+		ObjectSize:   objectSize,
+		Endpoint:     endpoint,
+		Concurrency:  t.config.Concurrency,
+		TotalOps:     totalSuccessOps + totalErrorOps,
+		SuccessOps:   totalSuccessOps,
+		ErrorOps:     totalErrorOps,
+		MinLatency:   time.Duration(minDuration),
+		MaxLatency:   time.Duration(maxDuration),
+		AvgLatency:   avgLatency,
+		P50Latency:   p50Latency,
+		P95Latency:   p95Latency,
+		P99Latency:   p99Latency,
+		TotalBytes:   totalBytes,
+		Throughput:   throughput,
+		OpsPerSecond: opsPerSecond,
+	}
 }
 
 // calculateBenchmarkStats calculates benchmark statistics from results
@@ -829,7 +1002,7 @@ func (t *S3PerformanceTester) RunAllTests() error {
 	fmt.Printf("\n")
 
 	// Track test results
-	var testResults = struct {
+	testResults := struct {
 		consistencyPassed  bool
 		connectivityPassed bool
 		latencyPassed      bool
@@ -983,14 +1156,14 @@ func main() {
 	objectSizes := []int64{
 		1024 * 1024,      // 1 MiB
 		10 * 1024 * 1024, // 10 MiB
-		//100 * 1024 * 1024, // 100 MiB
-		//		1024 * 1024 * 1024, // 1 GiB
+		// 100 * 1024 * 1024, // 100 MiB
+		// 1024 * 1024 * 1024, // 1 GiB
 	}
 	objectCounts := []int{
 		100, // 1 MiB - 1000 objects
 		10,  // 10 MiB - 100 objects
-		//10,   // 100 MiB - 10 objects
-		//1,    // 1 GiB - 1 object
+		// 10,   // 100 MiB - 10 objects
+		// 1,    // 1 GiB - 1 object
 	}
 
 	// Create test configuration

@@ -807,6 +807,9 @@ func (t *S3PerformanceTester) RunAllTests() error {
 	fmt.Printf("Global Endpoint: %s\n", t.config.GlobalEndpoint)
 	fmt.Printf("US Endpoints: %v\n", t.config.USEndpoints)
 
+	// Run consistency tests first
+	RunConsistencyTests(t)
+
 	// Run connectivity tests
 	t.runConnectivityTests()
 

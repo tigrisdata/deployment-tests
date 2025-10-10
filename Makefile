@@ -1,7 +1,7 @@
 # S3 Performance Test Makefile
 
 # Variables
-BINARY_NAME=s3-perf-test
+BINARY_NAME=t3-validator
 MAIN_FILE=main.go
 CONSISTENCY_FILE=consistency.go
 GO_VERSION=1.19

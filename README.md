@@ -5,15 +5,18 @@ A comprehensive Go-based performance testing tool for S3 services. This tool imp
 ## Test Suite Overview
 
 ### **Connectivity Tests**
+
 - **Health Check**: Tests health endpoint connectivity on each S3 endpoint (appends /admin/health)
 - **S3 Connectivity**: Tests S3 service connectivity using HeadBucket operations
 
 ### **Latency Benchmarks** (10 concurrency)
+
 - **PUT Latency**: Tests PUT operations with 1MiB, 100MiB, and 1GiB objects
 - **GET Latency**: Tests GET operations with 1MiB, 100MiB, and 1GiB objects
 - **GET from Remote Latency**: Tests GET operations from remote endpoints with 1MiB objects
 
 ### **Throughput Benchmarks** (10 concurrency)
+
 - **PUT Throughput**: Tests PUT operations with 1MiB, 100MiB, and 1GiB objects
 - **GET Throughput**: Tests GET operations with 1MiB, 100MiB, and 1GiB objects
 
@@ -37,6 +40,7 @@ A comprehensive Go-based performance testing tool for S3 services. This tool imp
 
 1. Clone or download this repository
 2. Install dependencies:
+
    ```bash
    make deps
    ```
@@ -55,33 +59,36 @@ A comprehensive Go-based performance testing tool for S3 services. This tool imp
 make run BUCKET=your-bucket-name
 
 # Or directly
-./s3-perf-test -bucket your-bucket-name
+./t3-validator -bucket your-bucket-name
 ```
 
 ### Command Line Options
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `-bucket` | S3 bucket name (required) | - |
-| `-concurrency` | Number of concurrent operations | 10 |
-| `-duration` | Test duration for throughput tests | 5m |
-| `-prefix` | S3 key prefix | perf-test |
-| `-global-endpoint` | Global S3 endpoint URL | - |
-| `-us-endpoints` | Comma-separated US regional endpoints | - |
+| Flag               | Description                           | Default   |
+| ------------------ | ------------------------------------- | --------- |
+| `-bucket`          | S3 bucket name (required)             | -         |
+| `-concurrency`     | Number of concurrent operations       | 10        |
+| `-duration`        | Test duration for throughput tests    | 5m        |
+| `-prefix`          | S3 key prefix                         | perf-test |
+| `-global-endpoint` | Global S3 endpoint URL                | -         |
+| `-us-endpoints`    | Comma-separated US regional endpoints | -         |
 
 ### Examples
 
 **Basic test suite:**
+
 ```bash
 make run BUCKET=my-test-bucket
 ```
 
 **Custom concurrency and duration:**
+
 ```bash
 make run-custom BUCKET=my-bucket CONCURRENCY=20 DURATION=10m
 ```
 
 **Test with specific endpoints:**
+
 ```bash
 make test-endpoints BUCKET=my-bucket \
   GLOBAL_ENDPOINT=https://s3.amazonaws.com \
@@ -89,13 +96,15 @@ make test-endpoints BUCKET=my-bucket \
 ```
 
 **Quick test (1 minute):**
+
 ```bash
 make quick-test BUCKET=my-bucket
 ```
 
 **Direct command line:**
+
 ```bash
-./s3-perf-test -bucket my-bucket \
+./t3-validator -bucket my-bucket \
   -concurrency 10 \
   -duration 5m \
   -global-endpoint https://s3.amazonaws.com \
@@ -107,6 +116,7 @@ make quick-test BUCKET=my-bucket
 The tool provides comprehensive performance metrics:
 
 ### Connectivity Results
+
 ```
 ================================================================================
 CONNECTIVITY TESTS
@@ -122,6 +132,7 @@ Testing US Regional Endpoint: https://s3.us-east-1.amazonaws.com
 ```
 
 ### Latency Results
+
 ```
 ================================================================================
 LATENCY BENCHMARKS
@@ -141,6 +152,7 @@ GET Latency Tests:
 ```
 
 ### Throughput Results
+
 ```
 ================================================================================
 THROUGHPUT BENCHMARKS
@@ -178,6 +190,7 @@ The tool uses the AWS SDK for Go v2, which supports multiple credential sources:
 ## Rate Limits
 
 Be aware of S3 rate limits:
+
 - PUT/COPY/POST/DELETE: 3,500 requests per second per prefix
 - GET/HEAD: 5,500 requests per second per prefix
 

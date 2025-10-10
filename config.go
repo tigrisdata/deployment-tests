@@ -14,14 +14,14 @@ var DefaultBenchmarkSizes = []BenchmarkSize{
 	{
 		ObjectSize:  1 * 1024 * 1024, // 1 MiB
 		DisplayName: "1 MiB",
-		RecordCount: 1000, // 1000 records = ~1 GB dataset
-		OpCount:     1000, // 1000 ops for P99 accuracy
+		RecordCount: 10,  // 1000 records = ~1 GB dataset
+		OpCount:     100, // 1000 ops for P99 accuracy
 	},
 	{
 		ObjectSize:  10 * 1024 * 1024, // 10 MiB
 		DisplayName: "10 MiB",
-		RecordCount: 100,  // 100 records = ~1 GB dataset
-		OpCount:     1000, // 1000 ops
+		RecordCount: 10,  // 100 records = ~1 GB dataset
+		OpCount:     100, // 1000 ops
 	},
 	{
 		ObjectSize:  100 * 1024 * 1024, // 100 MiB

@@ -377,17 +377,10 @@ func (t *S3PerformanceTester) runPerformanceBenchmarks() bool {
 			result := t.runPerformanceBenchmark("PUT", size.ObjectSize, size.RecordCount, size.OpCount, endpoint)
 
 			// Display latency metrics
-			if result.ErrorOps > 0 {
-				fmt.Printf("    Latency  - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
-					ColorBrightWhite, ColorReset, formatDurationAligned(result.AvgLatency),
-					ColorBrightWhite, ColorReset, formatDurationAligned(result.P95Latency),
-					ColorBrightWhite, ColorReset, formatDurationAligned(result.P99Latency))
-			} else {
-				fmt.Printf("    Latency  - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
-					ColorBrightWhite, ColorReset, formatDurationAligned(result.AvgLatency),
-					ColorBrightWhite, ColorReset, formatDurationAligned(result.P95Latency),
-					ColorBrightWhite, ColorReset, formatDurationAligned(result.P99Latency))
-			}
+			fmt.Printf("    Latency    - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
+				ColorBrightWhite, ColorReset, formatDurationAligned(result.AvgLatency),
+				ColorBrightWhite, ColorReset, formatDurationAligned(result.P95Latency),
+				ColorBrightWhite, ColorReset, formatDurationAligned(result.P99Latency))
 
 			// Display throughput metrics
 			if result.SuccessOps > 0 {
@@ -414,17 +407,16 @@ func (t *S3PerformanceTester) runPerformanceBenchmarks() bool {
 			result := t.runPerformanceBenchmark("GET", size.ObjectSize, size.RecordCount, size.OpCount, endpoint)
 
 			// Display latency metrics
-			if result.ErrorOps > 0 {
-				fmt.Printf("    Latency  - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
-					ColorBrightWhite, ColorReset, formatDurationAligned(result.AvgLatency),
-					ColorBrightWhite, ColorReset, formatDurationAligned(result.P95Latency),
-					ColorBrightWhite, ColorReset, formatDurationAligned(result.P99Latency))
-			} else {
-				fmt.Printf("    Latency  - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
-					ColorBrightWhite, ColorReset, formatDurationAligned(result.AvgLatency),
-					ColorBrightWhite, ColorReset, formatDurationAligned(result.P95Latency),
-					ColorBrightWhite, ColorReset, formatDurationAligned(result.P99Latency))
-			}
+			fmt.Printf("    Latency    - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
+				ColorBrightWhite, ColorReset, formatDurationAligned(result.AvgLatency),
+				ColorBrightWhite, ColorReset, formatDurationAligned(result.P95Latency),
+				ColorBrightWhite, ColorReset, formatDurationAligned(result.P99Latency))
+
+			// Display TTFB metrics (only for GET operations)
+			fmt.Printf("    TTFB       - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
+				ColorBrightWhite, ColorReset, formatDurationAligned(result.AvgTTFB),
+				ColorBrightWhite, ColorReset, formatDurationAligned(result.P95TTFB),
+				ColorBrightWhite, ColorReset, formatDurationAligned(result.P99TTFB))
 
 			// Display throughput metrics
 			if result.SuccessOps > 0 {

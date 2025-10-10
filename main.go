@@ -249,52 +249,6 @@ func (t *S3PerformanceTester) testS3Connectivity(endpoint string) (time.Duration
 	return duration, err
 }
 
-// runPerformanceBenchmark runs a single benchmark that collects both latency and throughput metrics
-func (t *S3PerformanceTester) runPerformanceBenchmark(operation string, objectSize int64, recordCount int, opCount int, endpoint string) workload.BenchmarkResult {
-	// Determine operation type
-	var opType workload.OpType
-	if operation == "PUT" {
-		opType = workload.OpPUT
-	} else {
-		opType = workload.OpGET
-	}
-
-	// Create workload configuration (YCSB-style)
-	config := workload.WorkloadConfig{
-		Bucket:          t.config.BucketName,
-		Endpoint:        endpoint,
-		Prefix:          fmt.Sprintf("%s/%s-%d", t.config.Prefix, operation, objectSize),
-		ObjectSize:      objectSize,
-		RecordCount:     recordCount, // Number of records to preload
-		OperationCount:  opCount,     // Number of operations to run
-		TestDuration:    0,           // Not used, using operation count only
-		Concurrency:     t.config.Concurrency,
-		OperationType:   opType,
-		Seed:            time.Now().UnixNano(),
-		KeyDistribution: workload.DistUniform,
-		ReuseObjects:    false,
-	}
-
-	// Get S3 client for endpoint
-	client := t.clients[endpoint]
-
-	// Create workload generator
-	gen, err := workload.NewGenerator(config, client)
-	if err != nil {
-		// Handle error
-		return workload.BenchmarkResult{}
-	}
-
-	// Run benchmark (includes preload for GET)
-	result, err := gen.RunBenchmark(context.Background())
-	if err != nil {
-		// Handle error
-		return workload.BenchmarkResult{}
-	}
-
-	return *result
-}
-
 // runConnectivityTests runs connectivity tests
 func (t *S3PerformanceTester) runConnectivityTests() bool {
 	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
@@ -352,6 +306,54 @@ func (t *S3PerformanceTester) runConnectivityTests() bool {
 	return allPassed
 }
 
+// runPerformanceBenchmark runs a single benchmark that collects both latency and throughput metrics
+func (t *S3PerformanceTester) runPerformanceBenchmark(operation string, size BenchmarkSize, endpoint string) workload.BenchmarkResult {
+	// Determine operation type
+	var opType workload.OpType
+	if operation == "PUT" {
+		opType = workload.OpPUT
+	} else {
+		opType = workload.OpGET
+	}
+
+	// Create workload configuration (YCSB-style)
+	config := workload.WorkloadConfig{
+		Bucket:          t.config.BucketName,
+		Endpoint:        endpoint,
+		Prefix:          fmt.Sprintf("%s/%s-%d", t.config.Prefix, operation, size.ObjectSize),
+		ObjectSize:      size.ObjectSize,
+		RecordCount:     size.RecordCount, // Number of records to preload
+		OperationCount:  size.OpCount,     // Number of operations to run
+		TestDuration:    0,                // Not used, using operation count only
+		Concurrency:     t.config.Concurrency,
+		OperationType:   opType,
+		Seed:            time.Now().UnixNano(),
+		KeyDistribution: workload.DistUniform,
+		ReuseObjects:    false,
+		UseMultipart:    size.UseMultipart,  // Enable multipart for large objects
+		MultipartSize:   size.MultipartSize, // Part size for multipart uploads
+	}
+
+	// Get S3 client for endpoint
+	client := t.clients[endpoint]
+
+	// Create workload generator
+	gen, err := workload.NewGenerator(config, client)
+	if err != nil {
+		// Handle error
+		return workload.BenchmarkResult{}
+	}
+
+	// Run benchmark (includes preload for GET)
+	result, err := gen.RunBenchmark(context.Background())
+	if err != nil {
+		// Handle error
+		return workload.BenchmarkResult{}
+	}
+
+	return *result
+}
+
 // runPerformanceBenchmarks runs all performance benchmarks (latency and throughput)
 func (t *S3PerformanceTester) runPerformanceBenchmarks() bool {
 	fmt.Printf("\n%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
@@ -373,8 +375,12 @@ func (t *S3PerformanceTester) runPerformanceBenchmarks() bool {
 		// PUT performance tests
 		fmt.Println("PUT Performance Tests:")
 		for _, size := range t.config.BenchmarkSizes {
-			fmt.Printf("  Testing %s (%d records, %d ops)...\n", size.DisplayName, size.RecordCount, size.OpCount)
-			result := t.runPerformanceBenchmark("PUT", size.ObjectSize, size.RecordCount, size.OpCount, endpoint)
+			multipartInfo := ""
+			if size.UseMultipart {
+				multipartInfo = fmt.Sprintf(", multipart: %d MiB parts", size.MultipartSize/(1024*1024))
+			}
+			fmt.Printf("  Testing %s (%d records, %d ops%s)...\n", size.DisplayName, size.RecordCount, size.OpCount, multipartInfo)
+			result := t.runPerformanceBenchmark("PUT", size, endpoint)
 
 			// Display latency metrics
 			fmt.Printf("    Latency    - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
@@ -404,7 +410,7 @@ func (t *S3PerformanceTester) runPerformanceBenchmarks() bool {
 		fmt.Println("\nGET Performance Tests:")
 		for _, size := range t.config.BenchmarkSizes {
 			fmt.Printf("  Testing %s (%d records, %d ops)...\n", size.DisplayName, size.RecordCount, size.OpCount)
-			result := t.runPerformanceBenchmark("GET", size.ObjectSize, size.RecordCount, size.OpCount, endpoint)
+			result := t.runPerformanceBenchmark("GET", size, endpoint)
 
 			// Display latency metrics
 			fmt.Printf("    Latency    - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
@@ -592,10 +598,6 @@ func main() {
 	// Use default benchmark sizes (1 MiB, 10 MiB, 100 MiB)
 	// These follow YCSB patterns with consistent ~1 GB dataset size
 	benchmarkSizes := DefaultBenchmarkSizes
-
-	// For now, only use first two sizes to match previous behavior
-	// TODO: Add flag to control which sizes to test
-	benchmarkSizes = DefaultBenchmarkSizes[:2] // 1 MiB and 10 MiB only
 
 	// Create test configuration
 	config := TestConfig{

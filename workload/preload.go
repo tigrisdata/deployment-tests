@@ -51,8 +51,8 @@ func (p *PreloadPhase) Run(ctx context.Context) error {
 			data := generateDataWithRNG(localRng, p.config.ObjectSize)
 
 			for i := 0; i < recordsPerWorker; i++ {
-				// Check for context cancellation every 10 objects
-				if i%10 == 0 {
+				// Check for context cancellation every 100 objects (optimization)
+				if i%100 == 0 {
 					select {
 					case <-ctx.Done():
 						return
@@ -88,8 +88,8 @@ func (p *PreloadPhase) Run(ctx context.Context) error {
 // generateDataWithRNG creates random data using a specific RNG instance
 func generateDataWithRNG(rng *rand.Rand, size int64) []byte {
 	data := make([]byte, size)
-	for i := range data {
-		data[i] = byte(rng.Intn(256))
-	}
+	// Use Read() for much faster bulk random data generation
+	// This is significantly faster than byte-by-byte generation
+	rng.Read(data)
 	return data
 }

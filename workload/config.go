@@ -58,6 +58,10 @@ type WorkloadConfig struct {
 
 	// Performance Options
 	ReuseObjects bool // Cycle through objects (for throughput tests)
+
+	// Multipart Upload Options
+	UseMultipart  bool  // Enable multipart upload for PUT operations
+	MultipartSize int64 // Part size for multipart uploads (0 = auto: 10 MiB)
 }
 
 // Validate checks if the configuration is valid

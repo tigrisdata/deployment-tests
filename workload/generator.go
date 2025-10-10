@@ -26,7 +26,7 @@ func NewGenerator(config WorkloadConfig, s3Client *s3.Client) (*WorkloadGenerato
 	}
 
 	// Initialize operations wrapper
-	ops := NewS3Operations(s3Client, config.Bucket)
+	ops := NewS3Operations(s3Client, config.Bucket, config.UseMultipart, config.MultipartSize)
 
 	// Initialize key generator
 	keyGen := NewKeyGenerator(config.Prefix, config.RecordCount, config.KeyDistribution, config.Concurrency)

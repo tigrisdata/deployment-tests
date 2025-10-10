@@ -15,14 +15,6 @@ import (
 	"github.com/aws/smithy-go/transport/http"
 )
 
-// By default, the code will use the following values
-const (
-	defAccessKey = "<access>"
-	defSecretKey = "<secret"
-	defBucket    = "<bucket>"
-	endpoint     = "https://t3.storage.dev"
-)
-
 // getRegionDisplayName returns the region name extracted from the endpoint URL
 func getRegionDisplayName(region string) string {
 	// Extract region from endpoint URL by taking the first component
@@ -42,16 +34,6 @@ func WithHeader(key, value string) func(*s3.Options) {
 	return func(options *s3.Options) {
 		options.APIOptions = append(options.APIOptions, http.AddHeaderValue(key, value))
 	}
-}
-
-type Options struct {
-	Regions   string
-	AccessKey string
-	SecretKey string
-	Bucket    string
-	Key       string
-	NoSeed    bool
-	Creds     bool
 }
 
 func applySameRegionsChecks(regionToClients map[string]*s3.Client, region string, bucket string, key string) {
@@ -180,7 +162,7 @@ func validateRegionsListEtag(s3client *s3.Client, bucket string, resPut map[stri
 		start  time.Time
 		passed = true
 	)
-	for attempts := 0; attempts < 32; attempts++ {
+	for attempts := 0; ; attempts++ {
 		if start.IsZero() {
 			start = time.Now()
 		}

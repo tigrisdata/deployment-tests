@@ -4,15 +4,23 @@ A comprehensive Go-based performance testing tool for S3 services. This tool imp
 
 ## Test Suite Overview
 
+The test suite includes four types of tests that can be run independently or together:
+
 ### **Connectivity Tests**
 
 - **Health Check**: Tests health endpoint connectivity on each S3 endpoint (appends /admin/health)
 - **S3 Connectivity**: Tests S3 service connectivity using HeadBucket operations
 
+### **Consistency Tests**
+
+- **Read-After-Write Consistency**: Tests immediate consistency within the same region
+- **Multi-Region Consistency**: Tests consistency across multiple regions after writes
+- **List Consistency**: Tests list operation consistency (same region and multi-region)
+
 ### **Latency Benchmarks** (10 concurrency)
 
 - **PUT Latency**: Tests PUT operations with 1MiB, 100MiB, and 1GiB objects
-- **GET Latency**: Tests GET operations with 1MiB, 100MiB, and 1GiB objects
+- **GET Latency**: Tests GET operations with 1MiB, 100MiB, and 1GiB objects (includes TTFB metrics)
 - **GET from Remote Latency**: Tests GET operations from remote endpoints with 1MiB objects
 
 ### **Throughput Benchmarks** (10 concurrency)
@@ -22,10 +30,12 @@ A comprehensive Go-based performance testing tool for S3 services. This tool imp
 
 ## Features
 
+- **Configurable Test Selection**: Run specific test suites or all tests together
 - **Multi-Endpoint Testing**: Tests global and multiple US regional endpoints
-- **Comprehensive Metrics**: Detailed latency percentiles (P50, P95, P99), throughput, and error rates
+- **Consistency Testing**: Validates read-after-write and multi-region consistency
+- **Comprehensive Metrics**: Detailed latency percentiles (P50, P95, P99), TTFB, throughput, and error rates
 - **Configurable Concurrency**: Adjustable concurrent operations for realistic load testing
-- **Multiple Object Sizes**: Tests with 1MiB, 100MiB, and 1GiB objects
+- **Multiple Object Sizes**: Tests with 1MiB and 10MiB objects (configurable)
 - **Real-time Results**: Live performance metrics during test execution
 - **Professional Reporting**: Detailed test results with statistical analysis
 
@@ -64,51 +74,62 @@ make run BUCKET=your-bucket-name
 
 ### Command Line Options
 
-| Flag               | Description                           | Default   |
-| ------------------ | ------------------------------------- | --------- |
-| `-bucket`          | S3 bucket name (required)             | -         |
-| `-concurrency`     | Number of concurrent operations       | 10        |
-| `-duration`        | Test duration for throughput tests    | 5m        |
-| `-prefix`          | S3 key prefix                         | perf-test |
-| `-global-endpoint` | Global S3 endpoint URL                | -         |
-| `-us-endpoints`    | Comma-separated US regional endpoints | -         |
+| Flag               | Description                                                                                  | Default   |
+| ------------------ | -------------------------------------------------------------------------------------------- | --------- |
+| `-bucket`          | S3 bucket name (required)                                                                    | -         |
+| `-concurrency`     | Number of concurrent operations                                                              | 10        |
+| `-duration`        | Test duration for throughput tests                                                           | 30s       |
+| `-prefix`          | S3 key prefix                                                                                | perf-test |
+| `-global-endpoint` | Global S3 endpoint URL                                                                       | -         |
+| `-us-endpoints`    | Comma-separated US regional endpoints                                                        | -         |
+| `-tests`           | Comma-separated list of tests to run: `connectivity`, `consistency`, `latency`, `throughput` | all       |
 
 ### Examples
 
-**Basic test suite:**
+**Basic test suite (all tests):**
 
 ```bash
-make run BUCKET=my-test-bucket
+./t3-validator -bucket my-test-bucket \
+  -global-endpoint https://t3.storage.dev \
+  -us-endpoints https://iad1.storage.dev,https://sjc.storage.dev
 ```
 
-**Custom concurrency and duration:**
-
-```bash
-make run-custom BUCKET=my-bucket CONCURRENCY=20 DURATION=10m
-```
-
-**Test with specific endpoints:**
-
-```bash
-make test-endpoints BUCKET=my-bucket \
-  GLOBAL_ENDPOINT=https://s3.amazonaws.com \
-  US_ENDPOINTS=https://s3.us-east-1.amazonaws.com,https://s3.us-west-2.amazonaws.com
-```
-
-**Quick test (1 minute):**
-
-```bash
-make quick-test BUCKET=my-bucket
-```
-
-**Direct command line:**
+**Run only connectivity and consistency tests:**
 
 ```bash
 ./t3-validator -bucket my-bucket \
-  -concurrency 10 \
-  -duration 5m \
-  -global-endpoint https://s3.amazonaws.com \
-  -us-endpoints https://s3.us-east-1.amazonaws.com,https://s3.us-west-2.amazonaws.com
+  -global-endpoint https://t3.storage.dev \
+  -us-endpoints https://iad1.storage.dev,https://sjc.storage.dev \
+  -tests connectivity,consistency
+```
+
+**Run only consistency tests:**
+
+```bash
+./t3-validator -bucket my-bucket \
+  -global-endpoint https://t3.storage.dev \
+  -us-endpoints https://iad1.storage.dev,https://sjc.storage.dev \
+  -tests consistency
+```
+
+**Run only performance benchmarks (skip connectivity and consistency):**
+
+```bash
+./t3-validator -bucket my-bucket \
+  -global-endpoint https://t3.storage.dev \
+  -us-endpoints https://iad1.storage.dev,https://sjc.storage.dev \
+  -tests latency,throughput \
+  -duration 1m
+```
+
+**Run latency benchmarks with custom concurrency:**
+
+```bash
+./t3-validator -bucket my-bucket \
+  -global-endpoint https://t3.storage.dev \
+  -us-endpoints https://iad1.storage.dev,https://sjc.storage.dev \
+  -tests latency \
+  -concurrency 20
 ```
 
 ## Test Results

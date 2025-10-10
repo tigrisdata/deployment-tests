@@ -4,6 +4,7 @@
 BINARY_NAME=t3-validator
 MAIN_FILE=main.go
 CONSISTENCY_FILE=consistency.go
+CONFIG_FILE=config.go
 GO_VERSION=1.19
 
 # Default target
@@ -14,16 +15,16 @@ all: build
 .PHONY: build
 build:
 	@echo "Building $(BINARY_NAME)..."
-	go build -o $(BINARY_NAME) $(MAIN_FILE) $(CONSISTENCY_FILE)
+	go build -o $(BINARY_NAME) $(MAIN_FILE) $(CONSISTENCY_FILE) $(CONFIG_FILE)
 	@echo "Build complete: $(BINARY_NAME)"
 
 # Build for multiple platforms
 .PHONY: build-all
 build-all:
 	@echo "Building for multiple platforms..."
-	GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME)-linux-amd64 $(MAIN_FILE) $(CONSISTENCY_FILE)
-	GOOS=darwin GOARCH=amd64 go build -o $(BINARY_NAME)-darwin-amd64 $(MAIN_FILE) $(CONSISTENCY_FILE)
-	GOOS=windows GOARCH=amd64 go build -o $(BINARY_NAME)-windows-amd64.exe $(MAIN_FILE) $(CONSISTENCY_FILE)
+	GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME)-linux-amd64 $(MAIN_FILE) $(CONSISTENCY_FILE) $(CONFIG_FILE)
+	GOOS=darwin GOARCH=amd64 go build -o $(BINARY_NAME)-darwin-amd64 $(MAIN_FILE) $(CONSISTENCY_FILE) $(CONFIG_FILE)
+	GOOS=windows GOARCH=amd64 go build -o $(BINARY_NAME)-windows-amd64.exe $(MAIN_FILE) $(CONSISTENCY_FILE) $(CONFIG_FILE)
 	@echo "Multi-platform build complete"
 
 # Run the complete test suite (requires BUCKET environment variable)

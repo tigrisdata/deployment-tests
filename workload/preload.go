@@ -10,19 +10,19 @@ import (
 
 // PreloadPhase handles the preloading of objects before benchmark execution
 type PreloadPhase struct {
-	ops          *S3Operations
-	keyGen       *KeyGenerator
-	config       *WorkloadConfig
-	workerSeeds  []int64
+	clientFactory func() *S3Operations
+	keyGen        *KeyGenerator
+	config        *WorkloadConfig
+	workerSeeds   []int64
 }
 
 // NewPreloadPhase creates a new preload phase handler
-func NewPreloadPhase(ops *S3Operations, keyGen *KeyGenerator, config *WorkloadConfig, workerSeeds []int64) *PreloadPhase {
+func NewPreloadPhase(clientFactory func() *S3Operations, keyGen *KeyGenerator, config *WorkloadConfig, workerSeeds []int64) *PreloadPhase {
 	return &PreloadPhase{
-		ops:         ops,
-		keyGen:      keyGen,
-		config:      config,
-		workerSeeds: workerSeeds,
+		clientFactory: clientFactory,
+		keyGen:        keyGen,
+		config:        config,
+		workerSeeds:   workerSeeds,
 	}
 }
 
@@ -46,6 +46,9 @@ func (p *PreloadPhase) Run(ctx context.Context) error {
 		go func(wID int, s int64) {
 			defer wg.Done()
 
+			// Create per-worker S3 client for isolated connection pool
+			workerOps := p.clientFactory()
+
 			// Per-worker RNG for data generation
 			localRng := rand.New(rand.NewSource(s))
 			data := generateDataWithRNG(localRng, p.config.ObjectSize)
@@ -61,7 +64,7 @@ func (p *PreloadPhase) Run(ctx context.Context) error {
 				}
 
 				key := p.keyGen.PreloadKey(wID, i)
-				result := p.ops.PutObject(ctx, key, data)
+				result := workerOps.PutObject(ctx, key, data)
 
 				if result.Success {
 					successCount.Add(1)

@@ -44,11 +44,11 @@ func (d *discardWriterAt) BytesWritten() int64 {
 
 // OperationResult holds the result of a single S3 operation
 type OperationResult struct {
-	Success    bool
-	Duration   time.Duration
-	TTFB       time.Duration // Time to first byte (GET only)
-	BytesRead  int64
-	Error      error
+	Success   bool
+	Duration  time.Duration
+	TTFB      time.Duration // Time to first byte (GET only)
+	BytesRead int64
+	Error     error
 }
 
 // S3Operations provides high-level S3 operation wrappers
@@ -65,11 +65,6 @@ type S3Operations struct {
 func NewS3Operations(client *s3.Client, bucketName string, useMultipart bool, multipartSize int64) *S3Operations {
 	const minPartSize = 5 * 1024 * 1024 // AWS S3 minimum part size is 5 MiB
 
-	// Default to 10 MiB parts if multipart is enabled but size is 0
-	if useMultipart && multipartSize == 0 {
-		multipartSize = 10 * 1024 * 1024
-	}
-
 	// Enforce AWS minimum part size
 	if useMultipart && multipartSize < minPartSize {
 		multipartSize = minPartSize
@@ -78,14 +73,14 @@ func NewS3Operations(client *s3.Client, bucketName string, useMultipart bool, mu
 	// Create AWS SDK's built-in uploader with optimized settings
 	uploader := manager.NewUploader(client, func(u *manager.Uploader) {
 		u.PartSize = multipartSize
-		u.Concurrency = 10 // Upload up to 10 parts in parallel
+		u.Concurrency = 10          // Upload up to 10 parts in parallel
 		u.LeavePartsOnError = false // Clean up failed uploads
 	})
 
 	// Create AWS SDK's built-in downloader with optimized settings
 	downloader := manager.NewDownloader(client, func(d *manager.Downloader) {
 		d.PartSize = multipartSize
-		d.Concurrency = 10 // Download up to 10 parts in parallel
+		d.Concurrency = 10       // Download up to 10 parts in parallel
 		d.PartBodyMaxRetries = 3 // Retry failed parts
 	})
 

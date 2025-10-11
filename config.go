@@ -17,27 +17,27 @@ var DefaultBenchmarkSizes = []BenchmarkSize{
 	{
 		ObjectSize:    1 * 1024 * 1024, // 1 MiB
 		DisplayName:   "1 MiB",
-		RecordCount:   10,    // 1000 records = ~1 GB dataset
-		OpCount:       100,   // 1000 ops for P99 accuracy
+		RecordCount:   100,   // 1000 records = ~1 GB dataset
+		OpCount:       1000,  // 1000 ops for P99 accuracy
 		UseMultipart:  false, // Single part for small objects
 		MultipartSize: 0,
 	},
-	{
-		ObjectSize:    10 * 1024 * 1024, // 10 MiB
-		DisplayName:   "10 MiB",
-		RecordCount:   10,    // 100 records = ~1 GB dataset
-		OpCount:       100,   // 1000 ops
-		UseMultipart:  false, // Single part for medium objects
-		MultipartSize: 0,
-	},
-	{
-		ObjectSize:    100 * 1024 * 1024, // 100 MiB
-		DisplayName:   "100 MiB",
-		RecordCount:   10,              // 10 records = ~1 GB dataset
-		OpCount:       100,             // 100 ops
-		UseMultipart:  true,            // Enable multipart for large objects
-		MultipartSize: 10 * 1024 * 1024, // 10 MiB parts (AWS minimum is 5 MiB)
-	},
+	// {
+	// 	ObjectSize:    10 * 1024 * 1024, // 10 MiB
+	// 	DisplayName:   "10 MiB",
+	// 	RecordCount:   10,    // 100 records = ~1 GB dataset
+	// 	OpCount:       100,   // 1000 ops
+	// 	UseMultipart:  false, // Single part for medium objects
+	// 	MultipartSize: 0,
+	// },
+	// {
+	// 	ObjectSize:    100 * 1024 * 1024, // 100 MiB
+	// 	DisplayName:   "100 MiB",
+	// 	RecordCount:   10,              // 10 records = ~1 GB dataset
+	// 	OpCount:       100,             // 100 ops
+	// 	UseMultipart:  true,            // Enable multipart for large objects
+	// 	MultipartSize: 10 * 1024 * 1024, // 10 MiB parts (AWS minimum is 5 MiB)
+	// },
 }
 
 // TestConfig holds configuration for the performance test

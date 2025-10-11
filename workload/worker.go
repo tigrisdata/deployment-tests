@@ -9,19 +9,19 @@ import (
 
 // WorkerPool manages a pool of workers for benchmark execution
 type WorkerPool struct {
-	ops         *S3Operations
-	keyGen      *KeyGenerator
-	config      *WorkloadConfig
-	workerSeeds []int64
+	clientFactory func() *S3Operations
+	keyGen        *KeyGenerator
+	config        *WorkloadConfig
+	workerSeeds   []int64
 }
 
 // NewWorkerPool creates a new worker pool
-func NewWorkerPool(ops *S3Operations, keyGen *KeyGenerator, config *WorkloadConfig, workerSeeds []int64) *WorkerPool {
+func NewWorkerPool(clientFactory func() *S3Operations, keyGen *KeyGenerator, config *WorkloadConfig, workerSeeds []int64) *WorkerPool {
 	return &WorkerPool{
-		ops:         ops,
-		keyGen:      keyGen,
-		config:      config,
-		workerSeeds: workerSeeds,
+		clientFactory: clientFactory,
+		keyGen:        keyGen,
+		config:        config,
+		workerSeeds:   workerSeeds,
 	}
 }
 
@@ -100,6 +100,9 @@ func (wp *WorkerPool) RunDuration(ctx context.Context) ([]WorkerResult, time.Dur
 
 // runWorkerFixedOps runs a fixed number of operations for a single worker
 func (wp *WorkerPool) runWorkerFixedOps(ctx context.Context, workerID int, seed int64, opsToRun int) WorkerResult {
+	// Create per-worker S3 client for isolated connection pool
+	workerOps := wp.clientFactory()
+
 	localRng := rand.New(rand.NewSource(seed))
 
 	// Pre-allocate result slices
@@ -130,7 +133,7 @@ func (wp *WorkerPool) runWorkerFixedOps(ctx context.Context, workerID int, seed 
 		}
 
 		// Execute operation with background context to prevent cancellation mid-flight
-		result := wp.executeOperation(context.Background(), workerID, opIndex, localRng, data)
+		result := wp.executeOperation(context.Background(), workerOps, workerID, opIndex, localRng, data)
 
 		// Record results
 		if result.Success {
@@ -156,6 +159,9 @@ func (wp *WorkerPool) runWorkerFixedOps(ctx context.Context, workerID int, seed 
 
 // runWorkerDuration runs operations for a duration for a single worker
 func (wp *WorkerPool) runWorkerDuration(ctx context.Context, workerID int, seed int64) WorkerResult {
+	// Create per-worker S3 client for isolated connection pool
+	workerOps := wp.clientFactory()
+
 	localRng := rand.New(rand.NewSource(seed))
 
 	// Pre-allocate result slices with reasonable capacity
@@ -188,7 +194,7 @@ func (wp *WorkerPool) runWorkerDuration(ctx context.Context, workerID int, seed 
 
 		// Execute operation with background context to prevent cancellation mid-flight
 		// The timeout context is only for stopping the loop, not cancelling operations
-		result := wp.executeOperation(context.Background(), workerID, opIndex, localRng, data)
+		result := wp.executeOperation(context.Background(), workerOps, workerID, opIndex, localRng, data)
 
 		// Record results
 		if result.Success {
@@ -207,20 +213,20 @@ func (wp *WorkerPool) runWorkerDuration(ctx context.Context, workerID int, seed 
 }
 
 // executeOperation executes a single S3 operation
-func (wp *WorkerPool) executeOperation(ctx context.Context, workerID, opIndex int, rng *rand.Rand, data []byte) OperationResult {
+func (wp *WorkerPool) executeOperation(ctx context.Context, ops *S3Operations, workerID, opIndex int, rng *rand.Rand, data []byte) OperationResult {
 	// Get the key to operate on
 	key := wp.keyGen.NextKey(workerID, opIndex, rng)
 
 	// Execute the appropriate operation
 	switch wp.config.OperationType {
 	case OpPUT:
-		return wp.ops.PutObject(ctx, key, data)
+		return ops.PutObject(ctx, key, data)
 	case OpGET:
-		return wp.ops.GetObject(ctx, key)
+		return ops.GetObject(ctx, key)
 	case OpMIXED:
 		// Decide whether to read or write based on ratio
 		shouldRead := rng.Float64() < wp.config.ReadWriteRatio
-		return wp.ops.MixedOperation(ctx, key, data, shouldRead)
+		return ops.MixedOperation(ctx, key, data, shouldRead)
 	default:
 		return OperationResult{Success: false, Error: &ConfigError{Field: "OperationType", Message: "unknown operation type"}}
 	}

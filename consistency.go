@@ -215,8 +215,8 @@ func applyListConsistencyChecks(regionToClients map[string]*s3.Client, regions [
 func validateRegionsList(s3client *s3.Client, bucket string, resPut map[string]string, prefix string, limit int) (int, time.Duration, bool) {
 	const (
 		maxDuration     = 1 * time.Minute
-		pollingInterval = 500 * time.Millisecond
-		maxAttempts     = 200 // Safety limit
+		pollingInterval = 100 * time.Millisecond
+		maxAttempts     = 600 // Safety limit
 	)
 
 	var (

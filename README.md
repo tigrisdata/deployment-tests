@@ -10,11 +10,16 @@ The test suite includes four types of tests that can be run independently or tog
 
 - **S3 Connectivity**: Tests service connectivity using HeadBucket operations
 
-### **Consistency Tests**
+### **Consistency Tests** (50 iterations per test with statistical analysis)
 
-- **Read-After-Write Consistency**: Tests immediate consistency within the same region
-- **Multi-Region Consistency**: Tests consistency across multiple regions after writes
-- **List Consistency**: Tests list operation consistency (same region and multi-region)
+- **Read-After-Write Consistency**: Tests object replication convergence across all regions
+  - Measures convergence time (Avg, P95, P99)
+  - Tracks immediate vs. eventual consistency distribution
+  - Includes same-region and cross-region validation
+- **List-After-Write Consistency**: Tests list operation consistency across all regions
+  - Measures list convergence time with multiple objects
+  - Validates ETag matching across regions
+  - Includes same-region and cross-region validation
 
 ### **Performance Benchmarks** (configurable concurrency, default 20)
 
@@ -64,23 +69,20 @@ The test suite includes four types of tests that can be run independently or tog
 ### Basic Usage
 
 ```bash
-# Run complete test suite
-make run BUCKET=your-bucket-name
-
-# Or directly
+# Make sure AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are set
 ./t3-validator -bucket your-bucket-name
 ```
 
 ### Command Line Options
 
-| Flag                  | Description                                                                        | Default   |
-| --------------------- | ---------------------------------------------------------------------------------- | --------- |
-| `-bucket`             | S3 bucket name (required)                                                          | -         |
-| `-concurrency`        | Number of concurrent operations                                                    | 20        |
-| `-prefix`             | S3 key prefix                                                                      | perf-test |
-| `-global-endpoint`    | Global S3 endpoint URL                                                             | -         |
-| `-regional-endpoints` | Comma-separated regional endpoints                                                 | -         |
-| `-tests`              | Comma-separated list of tests to run: `connectivity`, `consistency`, `performance` | all       |
+| Flag                  | Description                                                                        | Default                                                                   |
+| --------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `-bucket`             | S3 bucket name (required)                                                          | -                                                                         |
+| `-concurrency`        | Number of concurrent operations                                                    | 20                                                                        |
+| `-prefix`             | S3 key prefix                                                                      | perf-test                                                                 |
+| `-global-endpoint`    | Global S3 endpoint URL                                                             | https://t3.storage.dev                                                    |
+| `-regional-endpoints` | Comma-separated regional endpoints                                                 | https://iad1.storage.dev,https://ord1.storage.dev,https://sjc.storage.dev |
+| `-tests`              | Comma-separated list of tests to run: `connectivity`, `consistency`, `performance` | all                                                                       |
 
 ### Examples
 
@@ -147,6 +149,46 @@ Testing Regional Endpoint: https://sjc.storage.dev
   S3 Connectivity: SUCCESS - 198ms
 ```
 
+### Consistency Results
+
+```
+================================================================================
+CONSISTENCY TESTS
+================================================================================
+
+Testing Global Endpoint: https://t3.storage.dev
+
+PUT|GET (Read-After-Write Consistency) (50 iterations)
+  t3 -> t3 (50 iterations)
+    Convergence - Avg:       0s, P95:       0s, P99:       0s
+    Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
+  t3 -> iad (50 iterations)
+    Convergence - Avg: 406.000ms, P95: 900.000ms, P99:   1.100s
+    Distribution - Immediate:   0.0%, Eventual: 100.0%, Timeout:   0.0%
+  t3 -> ord1 (50 iterations)
+    Convergence - Avg:  7.000ms, P95: 100.000ms, P99: 200.000ms
+    Distribution - Immediate:  95.0%, Eventual:   5.0%, Timeout:   0.0%
+  t3 -> sjc (50 iterations)
+    Convergence - Avg:       0s, P95:       0s, P99:       0s
+    Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
+  SUCCESS - Read-After-Write Consistency test completed (145.779s)
+
+PUT|LIST (List-After-Write Consistency) (50 iterations)
+  t3 -> t3 (50 iterations)
+    Convergence - Avg:       0s, P95:       0s, P99:       0s
+    Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
+  t3 -> iad (50 iterations)
+    Convergence - Avg: 500.000ms, P95:   1.000s, P99:   1.500s
+    Distribution - Immediate:   0.0%, Eventual: 100.0%, Timeout:   0.0%
+  t3 -> ord1 (50 iterations)
+    Convergence - Avg:       0s, P95:       0s, P99:       0s
+    Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
+  t3 -> sjc (50 iterations)
+    Convergence - Avg:       0s, P95:       0s, P99:       0s
+    Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
+  SUCCESS - List-After-Write Consistency test completed (52.3s)
+```
+
 ### Performance Results
 
 ```
@@ -154,7 +196,7 @@ Testing Regional Endpoint: https://sjc.storage.dev
  PERFORMANCE TESTS
 ================================================================================
 
-Testing Endpoint: global
+Testing Endpoint: https://t3.storage.dev
 ------------------------------------------------------------
 PUT Performance Tests:
   Testing 1 MiB (100 records, 1000 ops)...

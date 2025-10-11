@@ -15,21 +15,21 @@ type BenchmarkSize struct {
 // Multipart uploads are enabled for objects >= 100 MiB for better performance
 var DefaultBenchmarkSizes = []BenchmarkSize{
 	{
-		ObjectSize:    1 * 1024 * 1024, // 1 MiB
+		ObjectSize:    1 * 1024 * 1024,
 		DisplayName:   "1 MiB",
-		RecordCount:   100,   // 100 records
-		OpCount:       10000, // 10000 ops for P99 accuracy
-		UseMultipart:  false, // Single part for small objects
+		RecordCount:   100,
+		OpCount:       1000,
+		UseMultipart:  false,
 		MultipartSize: 0,
 	},
-	// {
-	// 	ObjectSize:    10 * 1024 * 1024, // 10 MiB
-	// 	DisplayName:   "10 MiB",
-	// 	RecordCount:   10,    // 100 records = ~1 GB dataset
-	// 	OpCount:       100,   // 1000 ops
-	// 	UseMultipart:  false, // Single part for medium objects
-	// 	MultipartSize: 0,
-	// },
+	{
+		ObjectSize:    10 * 1024 * 1024,
+		DisplayName:   "10 MiB",
+		RecordCount:   100,
+		OpCount:       1000,
+		UseMultipart:  false,
+		MultipartSize: 0,
+	},
 	// {
 	// 	ObjectSize:    100 * 1024 * 1024, // 100 MiB
 	// 	DisplayName:   "100 MiB",

@@ -1,6 +1,6 @@
-# S3 Performance Test Suite
+# Tigris Validator Test Suite
 
-A comprehensive Go-based performance testing tool for S3 services. This tool implements a complete test suite covering connectivity, latency, and throughput benchmarks across global and regional endpoints.
+A comprehensive Go-based performance testing tool for Tigris. This tool implements a complete test suite covering connectivity, latency, and throughput tests across global and regional endpoints.
 
 ## Test Suite Overview
 
@@ -8,8 +8,8 @@ The test suite includes four types of tests that can be run independently or tog
 
 ### **Connectivity Tests**
 
-- **Health Check**: Tests health endpoint connectivity on each S3 endpoint (appends /admin/health)
-- **S3 Connectivity**: Tests S3 service connectivity using HeadBucket operations
+- **Health Check**: Tests health endpoint connectivity on each Tigris endpoint
+- **S3 Connectivity**: Tests service connectivity using HeadBucket operations
 
 ### **Consistency Tests**
 
@@ -17,25 +17,25 @@ The test suite includes four types of tests that can be run independently or tog
 - **Multi-Region Consistency**: Tests consistency across multiple regions after writes
 - **List Consistency**: Tests list operation consistency (same region and multi-region)
 
-### **Latency Benchmarks** (10 concurrency)
+### **Performance Benchmarks** (configurable concurrency, default 20)
 
-- **PUT Latency**: Tests PUT operations with 1MiB, 100MiB, and 1GiB objects
-- **GET Latency**: Tests GET operations with 1MiB, 100MiB, and 1GiB objects (includes TTFB metrics)
-- **GET from Remote Latency**: Tests GET operations from remote endpoints with 1MiB objects
-
-### **Throughput Benchmarks** (10 concurrency)
-
-- **PUT Throughput**: Tests PUT operations with 1MiB, 100MiB, and 1GiB objects
-- **GET Throughput**: Tests GET operations with 1MiB, 100MiB, and 1GiB objects
+- **PUT Performance**: Tests PUT operations with 1 MiB, 10 MiB, and 100 MiB objects
+  - 100 MiB objects use multipart upload with 10 MiB parts and parallel uploads
+  - Collects both latency and throughput metrics in a single test run
+- **GET Performance**: Tests GET operations with 1 MiB, 10 MiB, and 100 MiB objects
+  - 100 MiB objects use parallel downloads
+  - Includes TTFB (Time To First Byte) metrics
+  - Collects both latency and throughput metrics in a single test run
 
 ## Features
 
 - **Configurable Test Selection**: Run specific test suites or all tests together
 - **Multi-Endpoint Testing**: Tests global and multiple US regional endpoints
 - **Consistency Testing**: Validates read-after-write and multi-region consistency
-- **Comprehensive Metrics**: Detailed latency percentiles (P50, P95, P99), TTFB, throughput, and error rates
+- **Comprehensive Metrics**: Detailed latency percentiles (Avg, P95, P99), TTFB, throughput, and error rates
 - **Configurable Concurrency**: Adjustable concurrent operations for realistic load testing
-- **Multiple Object Sizes**: Tests with 1MiB and 10MiB objects (configurable)
+- **Multiple Object Sizes**: Tests with 1 MiB, 10 MiB, and 100 MiB objects
+- **Optimized Performance**: Per-worker S3 clients, buffer pooling, multipart uploads/downloads
 - **Real-time Results**: Live performance metrics during test execution
 - **Professional Reporting**: Detailed test results with statistical analysis
 
@@ -74,15 +74,14 @@ make run BUCKET=your-bucket-name
 
 ### Command Line Options
 
-| Flag               | Description                                                                                  | Default   |
-| ------------------ | -------------------------------------------------------------------------------------------- | --------- |
-| `-bucket`          | S3 bucket name (required)                                                                    | -         |
-| `-concurrency`     | Number of concurrent operations                                                              | 10        |
-| `-duration`        | Test duration for throughput tests                                                           | 30s       |
-| `-prefix`          | S3 key prefix                                                                                | perf-test |
-| `-global-endpoint` | Global S3 endpoint URL                                                                       | -         |
-| `-us-endpoints`    | Comma-separated US regional endpoints                                                        | -         |
-| `-tests`           | Comma-separated list of tests to run: `connectivity`, `consistency`, `latency`, `throughput` | all       |
+| Flag                  | Description                                                                        | Default   |
+| --------------------- | ---------------------------------------------------------------------------------- | --------- |
+| `-bucket`             | S3 bucket name (required)                                                          | -         |
+| `-concurrency`        | Number of concurrent operations                                                    | 20        |
+| `-prefix`             | S3 key prefix                                                                      | perf-test |
+| `-global-endpoint`    | Global S3 endpoint URL                                                             | -         |
+| `-regional-endpoints` | Comma-separated regional endpoints                                                 | -         |
+| `-tests`              | Comma-separated list of tests to run: `connectivity`, `consistency`, `performance` | all       |
 
 ### Examples
 
@@ -91,7 +90,7 @@ make run BUCKET=your-bucket-name
 ```bash
 ./t3-validator -bucket my-test-bucket \
   -global-endpoint https://t3.storage.dev \
-  -us-endpoints https://iad1.storage.dev,https://sjc.storage.dev
+  -regional-endpoints https://iad1.storage.dev,https://sjc.storage.dev
 ```
 
 **Run only connectivity and consistency tests:**
@@ -99,7 +98,7 @@ make run BUCKET=your-bucket-name
 ```bash
 ./t3-validator -bucket my-bucket \
   -global-endpoint https://t3.storage.dev \
-  -us-endpoints https://iad1.storage.dev,https://sjc.storage.dev \
+  -regional-endpoints https://iad1.storage.dev,https://sjc.storage.dev \
   -tests connectivity,consistency
 ```
 
@@ -108,28 +107,27 @@ make run BUCKET=your-bucket-name
 ```bash
 ./t3-validator -bucket my-bucket \
   -global-endpoint https://t3.storage.dev \
-  -us-endpoints https://iad1.storage.dev,https://sjc.storage.dev \
+  -regional-endpoints https://iad1.storage.dev,https://sjc.storage.dev \
   -tests consistency
 ```
 
-**Run only performance benchmarks (skip connectivity and consistency):**
+**Run only performance tests (skip connectivity and consistency):**
 
 ```bash
 ./t3-validator -bucket my-bucket \
   -global-endpoint https://t3.storage.dev \
-  -us-endpoints https://iad1.storage.dev,https://sjc.storage.dev \
-  -tests latency,throughput \
-  -duration 1m
+  -regional-endpoints https://iad1.storage.dev,https://sjc.storage.dev \
+  -tests performance
 ```
 
-**Run latency benchmarks with custom concurrency:**
+**Run performance tests with custom concurrency:**
 
 ```bash
 ./t3-validator -bucket my-bucket \
   -global-endpoint https://t3.storage.dev \
-  -us-endpoints https://iad1.storage.dev,https://sjc.storage.dev \
-  -tests latency \
-  -concurrency 20
+  -regional-endpoints https://iad1.storage.dev,https://sjc.storage.dev \
+  -tests performance \
+  -concurrency 50
 ```
 
 ## Test Results
@@ -143,53 +141,48 @@ The tool provides comprehensive performance metrics:
 CONNECTIVITY TESTS
 ================================================================================
 
-Testing Global Endpoint: https://s3.amazonaws.com
+Testing Global Endpoint: https://t3.storage.dev
   Health Check: SUCCESS - 15.2ms
   S3 Connectivity: SUCCESS - 245ms
 
-Testing US Regional Endpoint: https://s3.us-east-1.amazonaws.com
+Testing Regional Endpoint: https://sjc.storage.dev
   Health Check: SUCCESS - 12.8ms
   S3 Connectivity: SUCCESS - 198ms
 ```
 
-### Latency Results
+### Performance Results
 
 ```
 ================================================================================
-LATENCY BENCHMARKS
+ PERFORMANCE TESTS
 ================================================================================
 
-Testing Endpoint: https://s3.us-east-1.amazonaws.com
+Testing Endpoint: global
 ------------------------------------------------------------
-PUT Latency Tests:
-  Testing 1048576 bytes... Avg: 125ms, P95: 180ms, P99: 220ms
-  Testing 104857600 bytes... Avg: 1.2s, P95: 1.5s, P99: 1.8s
-  Testing 1073741824 bytes... Avg: 12.5s, P95: 15.2s, P99: 18.1s
+PUT Performance Tests:
+  Testing 1 MiB (100 records, 1000 ops)...
+    Latency    - Avg:   76.848ms, P95:  122.042ms, P99:  164.746ms
+    Throughput -  224.674 MB/s |  224.674 ops/s | 1000 success
+  Testing 10 MiB (100 records, 1000 ops)...
+    Latency    - Avg:  186.293ms, P95:  250.002ms, P99:  382.832ms
+    Throughput -  847.265 MB/s |   84.726 ops/s | 1000 success
+  Testing 100 MiB (10 records, 100 ops, multipart: 10 MiB parts)...
+    Latency    - Avg:  833.991ms, P95:  986.061ms, P99:     2.554s
+    Throughput -  729.186 MB/s |    7.292 ops/s | 100 success
 
-GET Latency Tests:
-  Testing 1048576 bytes... Avg: 98ms, P95: 145ms, P99: 175ms
-  Testing 104857600 bytes... Avg: 850ms, P95: 1.1s, P99: 1.3s
-  Testing 1073741824 bytes... Avg: 8.2s, P95: 10.1s, P99: 12.5s
-```
-
-### Throughput Results
-
-```
-================================================================================
-THROUGHPUT BENCHMARKS
-================================================================================
-
-Testing Endpoint: https://s3.us-east-1.amazonaws.com
-------------------------------------------------------------
-PUT Throughput Tests:
-  Testing 1048576 bytes... 45.2 MB/s, 43.1 ops/s
-  Testing 104857600 bytes... 78.5 MB/s, 0.8 ops/s
-  Testing 1073741824 bytes... 85.2 MB/s, 0.08 ops/s
-
-GET Throughput Tests:
-  Testing 1048576 bytes... 52.1 MB/s, 49.7 ops/s
-  Testing 104857600 bytes... 92.3 MB/s, 0.9 ops/s
-  Testing 1073741824 bytes... 98.7 MB/s, 0.09 ops/s
+GET Performance Tests:
+  Testing 1 MiB (100 records, 1000 ops)...
+    Latency    - Avg:   29.874ms, P95:   47.641ms, P99:   91.357ms
+    TTFB       - Avg:   20.464ms, P95:   37.175ms, P99:   73.371ms
+    Throughput -  467.864 MB/s |  467.864 ops/s | 1000 success
+  Testing 10 MiB (100 records, 1000 ops)...
+    Latency    - Avg:  119.839ms, P95:  165.933ms, P99:  260.861ms
+    TTFB       - Avg:   24.100ms, P95:   54.530ms, P99:   96.673ms
+    Throughput - 1319.319 MB/s |  131.932 ops/s | 1000 success
+  Testing 100 MiB (10 records, 100 ops)...
+    Latency    - Avg:  750.610ms, P95:     1.024s, P99:     1.117s
+    TTFB       - Avg:   75.061ms, P95:  102.399ms, P99:  111.651ms
+    Throughput - 2035.193 MB/s |   20.352 ops/s | 100 success
 ```
 
 ## AWS Credentials
@@ -204,9 +197,15 @@ The tool uses the AWS SDK for Go v2, which supports multiple credential sources:
 ## Performance Considerations
 
 - **Object Size**: Larger objects increase latency but may improve throughput
+  - 100 MiB objects automatically use multipart upload/download for better performance
 - **Concurrency**: Higher concurrency increases load but may hit rate limits
+  - Each worker thread has its own S3 client with isolated connection pool
 - **Endpoint Selection**: Choose endpoints close to your location for better performance
 - **Network Conditions**: Test results depend on network latency and bandwidth
+- **Optimizations**:
+  - Buffer pooling for memory efficiency
+  - Parallel multipart uploads (10 MiB parts, 10 concurrent parts)
+  - Parallel downloads for large objects
 
 ## Rate Limits
 

@@ -4,6 +4,7 @@
 BINARY_NAME=t3-validator
 MAIN_FILE=main.go
 CONSISTENCY_FILE=consistency.go
+CONFIG_FILE=config.go
 GO_VERSION=1.19
 
 # Default target
@@ -14,16 +15,16 @@ all: build
 .PHONY: build
 build:
 	@echo "Building $(BINARY_NAME)..."
-	go build -o $(BINARY_NAME) $(MAIN_FILE) $(CONSISTENCY_FILE)
+	go build -o $(BINARY_NAME) $(MAIN_FILE) $(CONSISTENCY_FILE) $(CONFIG_FILE)
 	@echo "Build complete: $(BINARY_NAME)"
 
 # Build for multiple platforms
 .PHONY: build-all
 build-all:
 	@echo "Building for multiple platforms..."
-	GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME)-linux-amd64 $(MAIN_FILE) $(CONSISTENCY_FILE)
-	GOOS=darwin GOARCH=amd64 go build -o $(BINARY_NAME)-darwin-amd64 $(MAIN_FILE) $(CONSISTENCY_FILE)
-	GOOS=windows GOARCH=amd64 go build -o $(BINARY_NAME)-windows-amd64.exe $(MAIN_FILE) $(CONSISTENCY_FILE)
+	GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME)-linux-amd64 $(MAIN_FILE) $(CONSISTENCY_FILE) $(CONFIG_FILE)
+	GOOS=darwin GOARCH=amd64 go build -o $(BINARY_NAME)-darwin-amd64 $(MAIN_FILE) $(CONSISTENCY_FILE) $(CONFIG_FILE)
+	GOOS=windows GOARCH=amd64 go build -o $(BINARY_NAME)-windows-amd64.exe $(MAIN_FILE) $(CONSISTENCY_FILE) $(CONFIG_FILE)
 	@echo "Multi-platform build complete"
 
 # Run the complete test suite (requires BUCKET environment variable)
@@ -34,7 +35,7 @@ run:
 		echo "Usage: make run BUCKET=your-bucket-name"; \
 		exit 1; \
 	fi
-	@echo "Running S3 performance test suite on bucket: $(BUCKET)"
+	@echo "Running Tigris performance test suite on bucket: $(BUCKET)"
 	./$(BINARY_NAME) -bucket $(BUCKET)
 
 # Run with custom parameters
@@ -45,13 +46,13 @@ run-custom:
 		echo "Usage: make run-custom BUCKET=your-bucket-name CONCURRENCY=10 DURATION=5m"; \
 		exit 1; \
 	fi
-	@echo "Running S3 performance test suite with custom parameters..."
+	@echo "Running Tigris performance test suite with custom parameters..."
 	./$(BINARY_NAME) -bucket $(BUCKET) \
 		-concurrency $(or $(CONCURRENCY),10) \
 		-duration $(or $(DURATION),5m) \
 		-prefix $(or $(PREFIX),perf-test) \
 		-global-endpoint $(or $(GLOBAL_ENDPOINT),"") \
-		-us-endpoints $(or $(US_ENDPOINTS),"")
+		-regional-endpoints $(or $(REGIONAL_ENDPOINTS),"")
 
 # Install dependencies
 .PHONY: deps
@@ -92,13 +93,13 @@ clean:
 # Show help
 .PHONY: help
 help:
-	@echo "S3 Performance Test - Available targets:"
+	@echo "Tigris Performance Test - Available targets:"
 	@echo ""
 	@echo "  build        - Build the binary (default)"
 	@echo "  build-all    - Build for multiple platforms"
 	@echo "  run          - Run complete test suite (requires BUCKET env var)"
 	@echo "  run-custom   - Run with custom parameters (requires BUCKET env var)"
-	@echo "  test-endpoints - Run with specific endpoints (requires BUCKET, GLOBAL_ENDPOINT, US_ENDPOINTS)"
+	@echo "  test-endpoints - Run with specific endpoints (requires BUCKET, GLOBAL_ENDPOINT, REGIONAL_ENDPOINTS)"
 	@echo "  deps         - Install dependencies"
 	@echo "  test         - Run tests"
 	@echo "  lint         - Run linter"
@@ -110,7 +111,7 @@ help:
 	@echo "  make build"
 	@echo "  make run BUCKET=my-test-bucket"
 	@echo "  make run-custom BUCKET=my-bucket CONCURRENCY=10 DURATION=5m"
-	@echo "  make test-endpoints BUCKET=my-bucket GLOBAL_ENDPOINT=https://s3.amazonaws.com US_ENDPOINTS=https://s3.us-east-1.amazonaws.com"
+	@echo "  make test-endpoints BUCKET=my-bucket GLOBAL_ENDPOINT=https://t3.storage.dev REGIONAL_ENDPOINTS=https://sjc.storage.dev"
 	@echo "  make clean"
 
 # Development targets
@@ -131,14 +132,14 @@ quick-test:
 # Test with specific endpoints
 .PHONY: test-endpoints
 test-endpoints:
-	@if [ -z "$(BUCKET)" ] || [ -z "$(GLOBAL_ENDPOINT)" ] || [ -z "$(US_ENDPOINTS)" ]; then \
-		echo "Error: BUCKET, GLOBAL_ENDPOINT, and US_ENDPOINTS environment variables are required"; \
-		echo "Usage: make test-endpoints BUCKET=your-bucket GLOBAL_ENDPOINT=https://s3.amazonaws.com US_ENDPOINTS=https://s3.us-east-1.amazonaws.com,https://s3.us-west-2.amazonaws.com"; \
+	@if [ -z "$(BUCKET)" ] || [ -z "$(GLOBAL_ENDPOINT)" ] || [ -z "$(REGIONAL_ENDPOINTS)" ]; then \
+		echo "Error: BUCKET, GLOBAL_ENDPOINT, and REGIONAL_ENDPOINTS environment variables are required"; \
+		echo "Usage: make test-endpoints BUCKET=your-bucket GLOBAL_ENDPOINT=https://t3.storage.dev REGIONAL_ENDPOINTS=https://iad1.storage.dev,https://ord1.storage.dev"; \
 		exit 1; \
 	fi
 	@echo "Running test with specific endpoints..."
 	./$(BINARY_NAME) -bucket $(BUCKET) \
 		-global-endpoint $(GLOBAL_ENDPOINT) \
-		-us-endpoints $(US_ENDPOINTS) \
+		-regional-endpoints $(REGIONAL_ENDPOINTS) \
 		-concurrency $(or $(CONCURRENCY),10) \
 		-duration $(or $(DURATION),5m)

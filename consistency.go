@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +15,81 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go/transport/http"
 )
+
+// ConvergenceMetric represents a single convergence measurement
+type ConvergenceMetric struct {
+	Attempts        int
+	ConvergenceTime time.Duration
+	Immediate       bool // True if converged on first attempt
+	TimedOut        bool // True if timed out without converging
+}
+
+// ConvergenceStats holds aggregated statistics from multiple iterations
+type ConvergenceStats struct {
+	Iterations       int
+	AvgTime          time.Duration
+	P95Time          time.Duration
+	P99Time          time.Duration
+	ImmediateCount   int
+	EventualCount    int
+	TimeoutCount     int
+	ConvergenceTimes []time.Duration // For percentile calculation
+}
+
+// calculateStats computes statistics from collected metrics
+func calculateStats(metrics []ConvergenceMetric) ConvergenceStats {
+	stats := ConvergenceStats{
+		Iterations:       len(metrics),
+		ConvergenceTimes: make([]time.Duration, 0, len(metrics)),
+	}
+
+	if len(metrics) == 0 {
+		return stats
+	}
+
+	var totalTime time.Duration
+	for _, m := range metrics {
+		if m.TimedOut {
+			stats.TimeoutCount++
+			continue
+		}
+
+		if m.Immediate {
+			stats.ImmediateCount++
+		} else {
+			stats.EventualCount++
+		}
+
+		stats.ConvergenceTimes = append(stats.ConvergenceTimes, m.ConvergenceTime)
+		totalTime += m.ConvergenceTime
+	}
+
+	successfulCount := stats.ImmediateCount + stats.EventualCount
+	if successfulCount > 0 {
+		stats.AvgTime = totalTime / time.Duration(successfulCount)
+
+		// Sort for percentile calculation
+		sort.Slice(stats.ConvergenceTimes, func(i, j int) bool {
+			return stats.ConvergenceTimes[i] < stats.ConvergenceTimes[j]
+		})
+
+		// Calculate P95
+		p95Index := int(float64(len(stats.ConvergenceTimes)) * 0.95)
+		if p95Index >= len(stats.ConvergenceTimes) {
+			p95Index = len(stats.ConvergenceTimes) - 1
+		}
+		stats.P95Time = stats.ConvergenceTimes[p95Index]
+
+		// Calculate P99
+		p99Index := int(float64(len(stats.ConvergenceTimes)) * 0.99)
+		if p99Index >= len(stats.ConvergenceTimes) {
+			p99Index = len(stats.ConvergenceTimes) - 1
+		}
+		stats.P99Time = stats.ConvergenceTimes[p99Index]
+	}
+
+	return stats
+}
 
 // getRegionDisplayName returns the region name extracted from the endpoint URL
 func getRegionDisplayName(region string) string {
@@ -67,23 +143,42 @@ func applySameRegionsChecks(regionToClients map[string]*s3.Client, region string
 }
 
 func applyRemoteRegionsChecks(regionToClients map[string]*s3.Client, regions []string, bucket string, key string) {
-	clog := Start("PUT|GET (Read-After-Write Consistency) Multiple Regions", Opts{ID: "T1", Region: regions})
-	start := time.Now()
+	const iterations = 50
 
-	eTagToValidate := put(regionToClients[regions[0]], bucket, key)
-	if eTagToValidate == "" {
-		clog.Failf("PUT operation failed")
-		return
+	clog := Start(fmt.Sprintf("PUT|GET (Read-After-Write Consistency) Multiple Regions (%d iterations)", iterations), Opts{ID: "T1", Region: regions})
+	overallStart := time.Now()
+
+	// Collect metrics for each region pair
+	regionMetrics := make(map[string][]ConvergenceMetric)
+	for i := 1; i < len(regions); i++ {
+		regionMetrics[regions[i]] = make([]ConvergenceMetric, 0, iterations)
 	}
 
-	for i := 1; i < len(regions); i++ {
-		passed := validateETag(regionToClients[regions[i]], regions[0], regions[i], bucket, key, eTagToValidate, clog)
-		if !passed {
-			clog.Failf("read-after-write failed in region %s", getRegionDisplayName(regions[i]))
-			return
+	// Run multiple iterations
+	for iter := 0; iter < iterations; iter++ {
+		// Use unique key for each iteration
+		iterKey := fmt.Sprintf("%s-iter-%d", key, iter)
+
+		eTagToValidate := put(regionToClients[regions[0]], bucket, iterKey)
+		if eTagToValidate == "" {
+			clog.Infof("PUT operation failed on iteration %d", iter)
+			continue
+		}
+
+		// Validate in each remote region
+		for i := 1; i < len(regions); i++ {
+			metric := validateETagWithMetric(regionToClients[regions[i]], regions[0], regions[i], bucket, iterKey, eTagToValidate, clog, false)
+			regionMetrics[regions[i]] = append(regionMetrics[regions[i]], metric)
 		}
 	}
-	clog.Successf(time.Since(start), "consistent in all regions'")
+
+	// Calculate and display statistics for each region
+	for i := 1; i < len(regions); i++ {
+		stats := calculateStats(regionMetrics[regions[i]])
+		clog.StatsSummaryf(regions[0], regions[i], stats)
+	}
+
+	clog.Successf(time.Since(overallStart), "Read-After-Write Consistency test completed")
 }
 
 func applySameRegionsListConsistency(regionToClients map[string]*s3.Client, region string, bucket string) {
@@ -216,28 +311,36 @@ func validateRegionsListEtagWithMetrics(s3client *s3.Client, bucket string, resP
 	return 0, 0, false
 }
 
-func validateETag(s3Client *s3.Client, sourceRegion string, remoteRegion string, bucket string, key string, expectedEtag string, clog *Logger) bool {
+// validateETagWithMetric validates ETag and returns convergence metrics
+func validateETagWithMetric(s3Client *s3.Client, sourceRegion string, remoteRegion string, bucket string, key string, expectedEtag string, clog *Logger, verbose bool) ConvergenceMetric {
+	if verbose {
+		clog.Infof("attempting read in remote region %s%s%s now\n", ColorYellow, getRegionDisplayName(remoteRegion), ColorReset)
+	}
+
 	const (
 		maxDuration     = 1 * time.Minute
 		pollingInterval = 100 * time.Millisecond
 		maxAttempts     = 600 // Safety limit
 	)
 
-	var (
-		firstPollTime time.Time
-		passed        = false
-	)
+	var firstPollTime time.Time
 
 	for attempts := 0; attempts < maxAttempts; attempts++ {
 		pollTime := time.Now()
 		eTagRemote, err := getEtagWithError(s3Client, bucket, key)
 		// Handle errors - distinguish from ETag mismatch
 		if err != nil {
+			if verbose {
+				clog.Infof("attempt '%d' GetObject failed: %v (will retry)", attempts, err)
+			}
+
 			// Check timeout before continuing
 			if !firstPollTime.IsZero() && time.Since(firstPollTime) > maxDuration {
-				clog.Failf("timeout after %v waiting for ETag=%s written-to=%s replicated-to=%s",
-					time.Since(firstPollTime), expectedEtag, getRegionDisplayName(sourceRegion), getRegionDisplayName(remoteRegion))
-				break
+				if verbose {
+					clog.Failf("timeout after %v waiting for ETag=%s written-to=%s replicated-to=%s",
+						time.Since(firstPollTime), expectedEtag, getRegionDisplayName(sourceRegion), getRegionDisplayName(remoteRegion))
+				}
+				return ConvergenceMetric{Attempts: attempts + 1, TimedOut: true}
 			}
 
 			time.Sleep(pollingInterval)
@@ -251,32 +354,46 @@ func validateETag(s3Client *s3.Client, sourceRegion string, remoteRegion string,
 
 		// Check if ETag matches
 		if expectedEtag == eTagRemote {
-			if attempts == 0 {
-				// Immediate success - no convergence time needed
-				clog.Successf(0, "ETag %s immediately consistent in region %s", eTagRemote, getRegionDisplayName(remoteRegion))
-			} else {
-				// Calculate convergence time based on polling intervals elapsed
-				// This represents the minimum time for convergence (lower bound)
-				// Actual convergence happened between (attempts-1) and attempts polling intervals
-				convergenceTime := time.Duration(attempts) * pollingInterval
-				clog.SuccessAfterf(attempts, convergenceTime, "Converged after ETag %s written at region %s remote region %s", eTagRemote, getRegionDisplayName(sourceRegion), getRegionDisplayName(remoteRegion))
+			convergenceTime := time.Duration(attempts) * pollingInterval
+			immediate := attempts == 0
+
+			if verbose {
+				if immediate {
+					// Immediate success - no convergence time needed
+					clog.Successf(0, "ETag %s immediately consistent in region %s", eTagRemote, getRegionDisplayName(remoteRegion))
+				} else {
+					// Calculate convergence time based on polling intervals elapsed
+					clog.SuccessAfterf(attempts, convergenceTime, "Converged after ETag %s written at region %s remote region %s", eTagRemote, getRegionDisplayName(sourceRegion), getRegionDisplayName(remoteRegion))
+				}
 			}
-			passed = true
-			break
+
+			return ConvergenceMetric{
+				Attempts:        attempts,
+				ConvergenceTime: convergenceTime,
+				Immediate:       immediate,
+				TimedOut:        false,
+			}
+		}
+
+		if verbose {
+			clog.Infof("retrying attempt '%d' waiting for ETag=%s written-to=%s replicated-to=%s dest has ETag=%s",
+				attempts, expectedEtag, getRegionDisplayName(sourceRegion), getRegionDisplayName(remoteRegion), eTagRemote)
 		}
 
 		// Check timeout before next attempt
 		if time.Since(firstPollTime) > maxDuration {
-			clog.Failf("timeout after %v (attempts: %d) waiting for ETag=%s written-to=%s replicated-to=%s dest has ETag=%s",
-				time.Since(firstPollTime), attempts+1, expectedEtag, getRegionDisplayName(sourceRegion), getRegionDisplayName(remoteRegion), eTagRemote)
-			break
+			if verbose {
+				clog.Failf("timeout after %v (attempts: %d) waiting for ETag=%s written-to=%s replicated-to=%s dest has ETag=%s",
+					time.Since(firstPollTime), attempts+1, expectedEtag, getRegionDisplayName(sourceRegion), getRegionDisplayName(remoteRegion), eTagRemote)
+			}
+			return ConvergenceMetric{Attempts: attempts + 1, TimedOut: true}
 		}
 
 		// Sleep before next poll
 		time.Sleep(pollingInterval)
 	}
 
-	return passed
+	return ConvergenceMetric{Attempts: maxAttempts, TimedOut: true}
 }
 
 func put(cl *s3.Client, buc string, key string) string {
@@ -416,6 +533,33 @@ func (c *Logger) SuccessAfterf(attempts int, duration time.Duration, format stri
 		ColorBrightWhite, formatDuration(duration), ColorReset)
 }
 
+// StatsSummaryf logs aggregated statistics
+func (c *Logger) StatsSummaryf(sourceRegion, targetRegion string, stats ConvergenceStats) {
+	immediatePercent := 0.0
+	eventualPercent := 0.0
+	timeoutPercent := 0.0
+
+	if stats.Iterations > 0 {
+		immediatePercent = float64(stats.ImmediateCount) * 100.0 / float64(stats.Iterations)
+		eventualPercent = float64(stats.EventualCount) * 100.0 / float64(stats.Iterations)
+		timeoutPercent = float64(stats.TimeoutCount) * 100.0 / float64(stats.Iterations)
+	}
+
+	fmt.Printf("  %s%s -> %s%s (%d iterations)\n",
+		ColorYellow, getRegionDisplayName(sourceRegion), getRegionDisplayName(targetRegion), ColorReset,
+		stats.Iterations)
+
+	if stats.ImmediateCount+stats.EventualCount > 0 {
+		fmt.Printf("    Convergence - Avg: %s%8s%s, P95: %s%8s%s, P99: %s%8s%s\n",
+			ColorBrightWhite, formatDuration(stats.AvgTime), ColorReset,
+			ColorBrightWhite, formatDuration(stats.P95Time), ColorReset,
+			ColorBrightWhite, formatDuration(stats.P99Time), ColorReset)
+	}
+
+	fmt.Printf("    Distribution - Immediate: %5.1f%%, Eventual: %5.1f%%, Timeout: %5.1f%%\n",
+		immediatePercent, eventualPercent, timeoutPercent)
+}
+
 // RunConsistencyTests runs the existing consistency tests
 func RunConsistencyTests(t *TigrisValidator) bool {
 	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
@@ -464,9 +608,13 @@ func runConsistencyTestsForEndpoint(t *TigrisValidator, endpointName, endpointUR
 		}
 	}
 
+	// Build regions array with endpointURL as the first element (source region)
 	regions := make([]string, 0, len(regionToClients))
+	regions = append(regions, endpointURL) // Source region first
 	for region := range regionToClients {
-		regions = append(regions, region)
+		if region != endpointURL {
+			regions = append(regions, region)
+		}
 	}
 
 	// Track if any test fails

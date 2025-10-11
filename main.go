@@ -487,8 +487,8 @@ func main() {
 		bucketName        = flag.String("bucket", "", "Bucket name (required)")
 		concurrency       = flag.Int("concurrency", 20, "Number of concurrent operations")
 		prefix            = flag.String("prefix", "perf-test", "Object key prefix")
-		globalEndpoint    = flag.String("global-endpoint", "", "Global Tigris endpoint URL")
-		regionalEndpoints = flag.String("regional-endpoints", "", "Comma-separated list of regional Tigris endpoints")
+		globalEndpoint    = flag.String("global-endpoint", "https://t3.storage.dev", "Global Tigris endpoint URL")
+		regionalEndpoints = flag.String("regional-endpoints", "https://iad1.storage.dev,https://ord1.storage.dev,https://sjc.storage.dev", "Comma-separated list of regional Tigris endpoints")
 
 		// Test selection flag
 		tests = flag.String("tests", "all", "Comma-separated list of tests to run: connectivity,consistency,performance (default: all)")

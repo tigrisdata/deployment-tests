@@ -145,12 +145,12 @@ func applySameRegionsChecks(regionToClients map[string]*s3.Client, region string
 func applyRemoteRegionsChecks(regionToClients map[string]*s3.Client, regions []string, bucket string, key string) {
 	const iterations = 50
 
-	clog := Start(fmt.Sprintf("PUT|GET (Read-After-Write Consistency) Multiple Regions (%d iterations)", iterations), Opts{ID: "T1", Region: regions})
+	clog := Start(fmt.Sprintf("PUT|GET (Read-After-Write Consistency) (%d iterations)", iterations), Opts{ID: "T1", Region: regions})
 	overallStart := time.Now()
 
-	// Collect metrics for each region pair
+	// Collect metrics for each region pair (including same region)
 	regionMetrics := make(map[string][]ConvergenceMetric)
-	for i := 1; i < len(regions); i++ {
+	for i := 0; i < len(regions); i++ {
 		regionMetrics[regions[i]] = make([]ConvergenceMetric, 0, iterations)
 	}
 
@@ -165,15 +165,15 @@ func applyRemoteRegionsChecks(regionToClients map[string]*s3.Client, regions []s
 			continue
 		}
 
-		// Validate in each remote region
-		for i := 1; i < len(regions); i++ {
+		// Validate in all regions (including same region)
+		for i := 0; i < len(regions); i++ {
 			metric := validateETagWithMetric(regionToClients[regions[i]], regions[0], regions[i], bucket, iterKey, eTagToValidate, clog, false)
 			regionMetrics[regions[i]] = append(regionMetrics[regions[i]], metric)
 		}
 	}
 
 	// Calculate and display statistics for each region
-	for i := 1; i < len(regions); i++ {
+	for i := 0; i < len(regions); i++ {
 		stats := calculateStats(regionMetrics[regions[i]])
 		clog.StatsSummaryf(regions[0], regions[i], stats)
 	}
@@ -623,7 +623,6 @@ func runConsistencyTestsForEndpoint(t *TigrisValidator, endpointName, endpointUR
 	// Use the existing consistency test functions
 	// For now, we'll assume they pass unless we implement detailed tracking
 	// TODO: Implement detailed failure tracking in individual test functions
-	applySameRegionsChecks(regionToClients, regions[0], t.config.BucketName, fmt.Sprintf("%s/consistency-test", t.config.Prefix))
 	applyRemoteRegionsChecks(regionToClients, regions, t.config.BucketName, fmt.Sprintf("%s/consistency-test", t.config.Prefix))
 	applySameRegionsListConsistency(regionToClients, regions[0], t.config.BucketName)
 	applyDiffRegionsListConsistency(regionToClients, regions, t.config.BucketName)

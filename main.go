@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -195,44 +194,6 @@ func NewTigrisValidator(cfg TestConfig) (*TigrisValidator, error) {
 	}, nil
 }
 
-// testHealthEndpoint tests health endpoint connectivity for a given S3 endpoint
-func (t *TigrisValidator) testHealthEndpoint(s3Endpoint string) (time.Duration, error) {
-	// Construct health endpoint URL by appending /admin/health to the S3 endpoint
-	healthURL := strings.TrimSuffix(s3Endpoint, "/") + "/admin/health"
-
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	start := time.Now()
-	resp, err := client.Get(healthURL)
-	duration := time.Since(start)
-
-	if err != nil {
-		return duration, err
-	}
-	defer resp.Body.Close()
-
-	// Check if response is OK
-	if resp.StatusCode != http.StatusOK {
-		return duration, fmt.Errorf("health check failed with status: %d", resp.StatusCode)
-	}
-
-	// Read response body to verify "OK" response
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return duration, fmt.Errorf("failed to read health response: %w", err)
-	}
-
-	// Handle both plain text "OK" and JSON "OK" responses
-	responseBody := strings.TrimSpace(string(body))
-	if responseBody != "OK" && responseBody != `"OK"` {
-		return duration, fmt.Errorf("unexpected health response: %s", string(body))
-	}
-
-	return duration, nil
-}
-
 // testS3Connectivity tests S3 connectivity to an endpoint
 func (t *TigrisValidator) testS3Connectivity(endpoint string) (time.Duration, error) {
 	client, exists := t.clients[endpoint]
@@ -261,15 +222,6 @@ func (t *TigrisValidator) runConnectivityTests() bool {
 	if t.config.GlobalEndpoint != "" {
 		fmt.Printf("\n%sTesting Global Endpoint: %s%s%s\n", ColorBrightWhite, ColorYellow, t.config.GlobalEndpoint, ColorReset)
 
-		// Health check test
-		healthDuration, err := t.testHealthEndpoint(t.config.GlobalEndpoint)
-		if err != nil {
-			fmt.Printf("  Health Check: %sFAILED%s - %v\n", ColorBrightRed, ColorReset, err)
-			allPassed = false
-		} else {
-			fmt.Printf("  Health Check: %sSUCCESS%s - %s\n", ColorBrightGreen, ColorReset, formatDuration(healthDuration))
-		}
-
 		// S3 connectivity test
 		s3Duration, err := t.testS3Connectivity("global")
 		if err != nil {
@@ -283,15 +235,6 @@ func (t *TigrisValidator) runConnectivityTests() bool {
 	// Test Regional endpoints
 	for _, endpoint := range t.config.RegionalEndpoints {
 		fmt.Printf("\n%sTesting Regional Endpoint: %s%s%s\n", ColorBrightWhite, ColorYellow, endpoint, ColorReset)
-
-		// Health check test
-		healthDuration, err := t.testHealthEndpoint(endpoint)
-		if err != nil {
-			fmt.Printf("  Health Check: %sFAILED%s - %v\n", ColorBrightRed, ColorReset, err)
-			allPassed = false
-		} else {
-			fmt.Printf("  Health Check: %sSUCCESS%s - %s\n", ColorBrightGreen, ColorReset, formatDuration(healthDuration))
-		}
 
 		// S3 connectivity test
 		s3Duration, err := t.testS3Connectivity(endpoint)

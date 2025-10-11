@@ -112,36 +112,6 @@ func WithHeader(key, value string) func(*s3.Options) {
 	}
 }
 
-func applySameRegionsChecks(regionToClients map[string]*s3.Client, region string, bucket string, key string) {
-	clog := Start("PUT|GET (Read-After-Write Consistency) Same Region", Opts{ID: "T0", Region: []string{region}})
-	//	start := time.Now()
-
-	eTagToValidate := put(regionToClients[region], bucket, key)
-	if eTagToValidate == "" {
-		clog.Failf("PUT operation failed")
-		return
-	}
-
-	// Immediate GET to verify consistency
-	resp, err := regionToClients[region].GetObject(context.TODO(), &s3.GetObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(key),
-	})
-	if err != nil {
-		clog.Failf("GET operation failed: %v", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.ETag == nil || *resp.ETag != eTagToValidate {
-		clog.Failf("ETag mismatch: expected %s, got %s", eTagToValidate, *resp.ETag)
-		return
-	}
-
-	// object is conistent immediately
-	clog.Successf(0, "read-after-write consistent")
-}
-
 func applyRemoteRegionsChecks(regionToClients map[string]*s3.Client, regions []string, bucket string, key string) {
 	const iterations = 50
 
@@ -167,7 +137,7 @@ func applyRemoteRegionsChecks(regionToClients map[string]*s3.Client, regions []s
 
 		// Validate in all regions (including same region)
 		for i := 0; i < len(regions); i++ {
-			metric := validateETagWithMetric(regionToClients[regions[i]], regions[0], regions[i], bucket, iterKey, eTagToValidate, clog, false)
+			metric := validateETag(regionToClients[regions[i]], regions[0], regions[i], bucket, iterKey, eTagToValidate, clog, false)
 			regionMetrics[regions[i]] = append(regionMetrics[regions[i]], metric)
 		}
 	}
@@ -181,69 +151,72 @@ func applyRemoteRegionsChecks(regionToClients map[string]*s3.Client, regions []s
 	clog.Successf(time.Since(overallStart), "Read-After-Write Consistency test completed")
 }
 
-func applySameRegionsListConsistency(regionToClients map[string]*s3.Client, region string, bucket string) {
-	clog := Start("PUT|LIST (List-After-Write Consistency) Same Region", Opts{ID: "T2", Region: []string{region}})
+func applyListConsistencyChecks(regionToClients map[string]*s3.Client, regions []string, bucket string) {
+	const iterations = 10
 
-	var (
-		err    error
-		resPut map[string]string
-	)
+	clog := Start(fmt.Sprintf("PUT|LIST (List-After-Write Consistency) (%d iterations)", iterations), Opts{ID: "T2", Region: regions})
+	overallStart := time.Now()
 
-	for attempts := 0; attempts < 10; attempts++ {
-		resPut, err = putResults(regionToClients[region], bucket, []string{"list-consistency-1", "list-consistency-2", "list-consistency-3"})
-		if err == nil {
-			break
+	// Collect metrics for each region pair (including same region)
+	regionMetrics := make(map[string][]ConvergenceMetric)
+	for i := 0; i < len(regions); i++ {
+		regionMetrics[regions[i]] = make([]ConvergenceMetric, 0, iterations)
+	}
+
+	// Run multiple iterations
+	for iter := 0; iter < iterations; iter++ {
+		// Create unique prefix and keys for this iteration
+		prefix := fmt.Sprintf("list-iter-%d-", iter)
+		keys := []string{
+			fmt.Sprintf("%sobj-1", prefix),
+			fmt.Sprintf("%sobj-2", prefix),
+			fmt.Sprintf("%sobj-3", prefix),
 		}
-	}
 
-	attempts, convergenceTime, passed := validateRegionsListEtagWithMetrics(regionToClients[region], bucket, resPut)
-	if !passed {
-		clog.Failf("list results validation failed in region %s", getRegionDisplayName(region))
-		return
-	}
-	if attempts == 0 {
-		clog.Successf(0, "List immediately consistent in region %s", getRegionDisplayName(region))
-	} else {
-		clog.SuccessAfterf(attempts, convergenceTime, "List converged after %v (attempts: %d) at region %s", convergenceTime, attempts, getRegionDisplayName(region))
-	}
-}
-
-func applyDiffRegionsListConsistency(regionToClients map[string]*s3.Client, regions []string, bucket string) {
-	clog := Start("PUT|LIST (List-After-Write Consistency) Diff Region", Opts{ID: "T3", Region: regions})
-
-	var (
-		err    error
-		resPut map[string]string
-	)
-
-	for attempts := 0; attempts < 10; attempts++ {
-		resPut, err = putResults(regionToClients[regions[0]], bucket, []string{"list-consistency-1", "list-consistency-2", "list-consistency-3"})
-		if err == nil {
-			break
+		// PUT objects to source region
+		var resPut map[string]string
+		var err error
+		for attempts := 0; attempts < 10; attempts++ {
+			resPut, err = putResults(regionToClients[regions[0]], bucket, keys)
+			if err == nil {
+				break
+			}
 		}
-	}
-
-	for _, region := range regions[1:] {
-		attempts, convergenceTime, passed := validateRegionsListEtagWithMetrics(regionToClients[region], bucket, resPut)
-		if !passed {
-			clog.Failf("list results validation failed in region %s", getRegionDisplayName(region))
+		if err != nil {
+			clog.Infof("PUT operation failed on iteration %d", iter)
 			continue
 		}
-		if attempts == 0 {
-			clog.Successf(0, "List immediately consistent in region %s", getRegionDisplayName(region))
-		} else {
-			clog.SuccessAfterf(attempts, convergenceTime, "List converged after %v (attempts: %d) at region %s", convergenceTime, attempts, getRegionDisplayName(region))
+
+		// Validate in all regions (including same region)
+		for i := 0; i < len(regions); i++ {
+			attempts, convergenceTime, passed := validateRegionsList(regionToClients[regions[i]], bucket, resPut, prefix, 3)
+
+			metric := ConvergenceMetric{
+				Attempts:        attempts,
+				ConvergenceTime: convergenceTime,
+				Immediate:       attempts == 0,
+				TimedOut:        !passed,
+			}
+			regionMetrics[regions[i]] = append(regionMetrics[regions[i]], metric)
 		}
 	}
+
+	// Calculate and display statistics for each region
+	for i := 0; i < len(regions); i++ {
+		stats := calculateStats(regionMetrics[regions[i]])
+		clog.StatsSummaryf(regions[0], regions[i], stats)
+	}
+
+	clog.Successf(time.Since(overallStart), "List-After-Write Consistency test completed")
 }
 
-// validateRegionsListEtagWithMetrics validates list consistency and returns metrics
+// validateRegionsList validates list consistency with a specific prefix and returns metrics
 // Returns: (attempts, convergenceTime, passed)
-func validateRegionsListEtagWithMetrics(s3client *s3.Client, bucket string, resPut map[string]string) (int, time.Duration, bool) {
+func validateRegionsList(s3client *s3.Client, bucket string, resPut map[string]string, prefix string, limit int) (int, time.Duration, bool) {
 	const (
 		maxDuration     = 1 * time.Minute
-		pollingInterval = 100 * time.Millisecond
-		maxAttempts     = 600 // Safety limit
+		pollingInterval = 500 * time.Millisecond
+		maxAttempts     = 200 // Safety limit
 	)
 
 	var (
@@ -253,7 +226,7 @@ func validateRegionsListEtagWithMetrics(s3client *s3.Client, bucket string, resP
 
 	for attempts := 0; attempts < maxAttempts; attempts++ {
 		pollTime := time.Now()
-		resList, err := listResults(s3client, bucket, "list-consistency-", 3)
+		resList, err := listResults(s3client, bucket, prefix, limit)
 		// Handle errors - distinguish from mismatch
 		if err != nil {
 			// Check timeout before continuing
@@ -311,8 +284,8 @@ func validateRegionsListEtagWithMetrics(s3client *s3.Client, bucket string, resP
 	return 0, 0, false
 }
 
-// validateETagWithMetric validates ETag and returns convergence metrics
-func validateETagWithMetric(s3Client *s3.Client, sourceRegion string, remoteRegion string, bucket string, key string, expectedEtag string, clog *Logger, verbose bool) ConvergenceMetric {
+// validateETag validates ETag and returns convergence metrics
+func validateETag(s3Client *s3.Client, sourceRegion string, remoteRegion string, bucket string, key string, expectedEtag string, clog *Logger, verbose bool) ConvergenceMetric {
 	if verbose {
 		clog.Infof("attempting read in remote region %s%s%s now\n", ColorYellow, getRegionDisplayName(remoteRegion), ColorReset)
 	}
@@ -620,12 +593,8 @@ func runConsistencyTestsForEndpoint(t *TigrisValidator, endpointName, endpointUR
 	// Track if any test fails
 	allPassed := true
 
-	// Use the existing consistency test functions
-	// For now, we'll assume they pass unless we implement detailed tracking
-	// TODO: Implement detailed failure tracking in individual test functions
 	applyRemoteRegionsChecks(regionToClients, regions, t.config.BucketName, fmt.Sprintf("%s/consistency-test", t.config.Prefix))
-	applySameRegionsListConsistency(regionToClients, regions[0], t.config.BucketName)
-	applyDiffRegionsListConsistency(regionToClients, regions, t.config.BucketName)
+	applyListConsistencyChecks(regionToClients, regions, t.config.BucketName)
 
 	return allPassed
 }

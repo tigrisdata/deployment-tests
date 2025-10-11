@@ -87,7 +87,7 @@ func applyRemoteRegionsChecks(regionToClients map[string]*s3.Client, regions []s
 }
 
 func applySameRegionsListConsistency(regionToClients map[string]*s3.Client, region string, bucket string) {
-	clog := Start("PUT|LIST (Read-After-Write Consistency) Same Region", Opts{ID: "T2", Region: []string{region}})
+	clog := Start("PUT|LIST (List-After-Write Consistency) Same Region", Opts{ID: "T2", Region: []string{region}})
 	start := time.Now()
 
 	var (
@@ -129,7 +129,7 @@ func applySameRegionsListConsistency(regionToClients map[string]*s3.Client, regi
 }
 
 func applyDiffRegionsListConsistency(regionToClients map[string]*s3.Client, regions []string, bucket string) {
-	clog := Start("PUT|LIST (Read-After-Write Consistency) Diff Region", Opts{ID: "T3", Region: regions})
+	clog := Start("PUT|LIST (List-After-Write Consistency) Diff Region", Opts{ID: "T3", Region: regions})
 	overallStart := time.Now()
 
 	var (
@@ -145,97 +145,162 @@ func applyDiffRegionsListConsistency(regionToClients map[string]*s3.Client, regi
 	}
 
 	for _, region := range regions[1:] {
-		start := time.Now()
-		passed := validateRegionsListEtag(regionToClients[region], bucket, resPut)
+		attempts, convergenceTime, passed := validateRegionsListEtagWithMetrics(regionToClients[region], bucket, resPut)
 		if !passed {
 			clog.Failf("list results validation failed in region %s", getRegionDisplayName(region))
 			continue
 		}
-		clog.Infof("List Converged after '%v' at region %s", time.Since(start), getRegionDisplayName(region))
+		if attempts == 0 {
+			clog.Infof("List immediately consistent in region %s", getRegionDisplayName(region))
+		} else {
+			clog.Infof("List converged after %v (attempts: %d) at region %s", convergenceTime, attempts, getRegionDisplayName(region))
+		}
 	}
 
 	clog.Successf(time.Since(overallStart), "consistent in all regions'")
 }
 
-func validateRegionsListEtag(s3client *s3.Client, bucket string, resPut map[string]string) bool {
-	var (
-		start  time.Time
-		passed = true
+// validateRegionsListEtagWithMetrics validates list consistency and returns metrics
+// Returns: (attempts, convergenceTime, passed)
+func validateRegionsListEtagWithMetrics(s3client *s3.Client, bucket string, resPut map[string]string) (int, time.Duration, bool) {
+	const (
+		maxDuration     = 1 * time.Minute
+		pollingInterval = 100 * time.Millisecond
+		maxAttempts     = 600 // Safety limit
 	)
-	for attempts := 0; ; attempts++ {
-		if start.IsZero() {
-			start = time.Now()
-		}
 
+	var (
+		firstPollTime time.Time
+		passed        = false
+	)
+
+	for attempts := 0; attempts < maxAttempts; attempts++ {
+		pollTime := time.Now()
 		resList, err := listResults(s3client, bucket, "list-consistency-", 3)
+		// Handle errors - distinguish from mismatch
 		if err != nil {
-			continue
-		}
-		if len(resPut) != len(resList) {
-			continue
-		} else {
-			passed = func() bool {
-				for k, v := range resPut {
-					vv, ok := resList[k]
-					if !ok {
-						return false
-					}
-					if vv != v {
-						return false
-					}
-				}
-				return true
-			}()
-
-			if passed {
-				return true
+			// Check timeout before continuing
+			if !firstPollTime.IsZero() && time.Since(firstPollTime) > maxDuration {
+				break
 			}
+			time.Sleep(pollingInterval)
+			continue
 		}
-		if time.Since(start) > 1*time.Minute {
+
+		// Record first successful poll time for timeout tracking
+		if firstPollTime.IsZero() {
+			firstPollTime = pollTime
+		}
+
+		// Check if count matches
+		if len(resPut) != len(resList) {
+			// Check timeout before next attempt
+			if time.Since(firstPollTime) > maxDuration {
+				break
+			}
+			time.Sleep(pollingInterval)
+			continue
+		}
+
+		// Check if all keys and ETags match
+		passed = func() bool {
+			for k, v := range resPut {
+				vv, ok := resList[k]
+				if !ok {
+					return false
+				}
+				if vv != v {
+					return false
+				}
+			}
+			return true
+		}()
+
+		if passed {
+			// Calculate convergence time based on polling intervals elapsed
+			convergenceTime := time.Duration(attempts) * pollingInterval
+			return attempts, convergenceTime, true
+		}
+
+		// Check timeout before next attempt
+		if time.Since(firstPollTime) > maxDuration {
 			break
 		}
+
+		// Sleep before next poll
+		time.Sleep(pollingInterval)
 	}
 
-	return false
+	return 0, 0, false
 }
 
 func validateETag(s3Client *s3.Client, sourceRegion string, remoteRegion string, bucket string, key string, expectedEtag string, clog *Logger) bool {
 	clog.Infof("attempting read in remote region %s%s%s now\n", ColorYellow, getRegionDisplayName(remoteRegion), ColorReset)
-	var (
-		start  time.Time
-		passed = false
-	)
-	for attempts := 0; ; attempts++ {
-		eTagRemote := getEtag(s3Client, bucket, key)
 
-		// Only start timer if first attempt fails
-		if attempts == 0 && expectedEtag != eTagRemote {
-			start = time.Now()
+	const (
+		maxDuration     = 1 * time.Minute
+		pollingInterval = 100 * time.Millisecond
+		maxAttempts     = 600 // Safety limit
+	)
+
+	var (
+		firstPollTime time.Time
+		passed        = false
+	)
+
+	for attempts := 0; attempts < maxAttempts; attempts++ {
+		pollTime := time.Now()
+		eTagRemote, err := getEtagWithError(s3Client, bucket, key)
+		// Handle errors - distinguish from ETag mismatch
+		if err != nil {
+			clog.Infof("attempt '%d' GetObject failed: %v (will retry)", attempts, err)
+
+			// Check timeout before continuing
+			if !firstPollTime.IsZero() && time.Since(firstPollTime) > maxDuration {
+				clog.Failf("timeout after %v waiting for ETag=%s written-to=%s replicated-to=%s",
+					time.Since(firstPollTime), expectedEtag, getRegionDisplayName(sourceRegion), getRegionDisplayName(remoteRegion))
+				break
+			}
+
+			time.Sleep(pollingInterval)
+			continue
 		}
 
+		// Record first successful poll time for timeout tracking
+		if firstPollTime.IsZero() {
+			firstPollTime = pollTime
+		}
+
+		// Check if ETag matches
 		if expectedEtag == eTagRemote {
 			if attempts == 0 {
 				// Immediate success - no convergence time needed
 				clog.Successf(0, "ETag %s immediately consistent in region %s", eTagRemote, getRegionDisplayName(remoteRegion))
 			} else {
-				// Converged after some attempts
-				clog.SuccessAfterf(attempts, time.Since(start), "Converged after ETag %s written at region %s remote region %s", eTagRemote, getRegionDisplayName(sourceRegion), getRegionDisplayName(remoteRegion))
+				// Calculate convergence time based on polling intervals elapsed
+				// This represents the minimum time for convergence (lower bound)
+				// Actual convergence happened between (attempts-1) and attempts polling intervals
+				convergenceTime := time.Duration(attempts) * pollingInterval
+				clog.SuccessAfterf(attempts, convergenceTime, "Converged after ETag %s written at region %s remote region %s", eTagRemote, getRegionDisplayName(sourceRegion), getRegionDisplayName(remoteRegion))
 			}
 			passed = true
 			break
 		}
 
-		clog.Infof("retrying attempt '%d' waiting for ETag=%s written-to=%s replicated-to=%s dest has ETag=%s", attempts, expectedEtag, getRegionDisplayName(sourceRegion), getRegionDisplayName(remoteRegion), eTagRemote)
+		clog.Infof("retrying attempt '%d' waiting for ETag=%s written-to=%s replicated-to=%s dest has ETag=%s",
+			attempts, expectedEtag, getRegionDisplayName(sourceRegion), getRegionDisplayName(remoteRegion), eTagRemote)
 
-		if !start.IsZero() && time.Since(start) > 1*time.Minute {
-			clog.Failf("unexpected stopping attempts '%d' waiting for ETag=%s written-to=%s replicated-to=%s dest has ETag=%s", attempts, expectedEtag, getRegionDisplayName(sourceRegion), getRegionDisplayName(remoteRegion), eTagRemote)
+		// Check timeout before next attempt
+		if time.Since(firstPollTime) > maxDuration {
+			clog.Failf("timeout after %v (attempts: %d) waiting for ETag=%s written-to=%s replicated-to=%s dest has ETag=%s",
+				time.Since(firstPollTime), attempts+1, expectedEtag, getRegionDisplayName(sourceRegion), getRegionDisplayName(remoteRegion), eTagRemote)
 			break
 		}
 
-		if attempts > 2 {
-			time.Sleep(10 * time.Second)
-		}
+		// Sleep before next poll
+		time.Sleep(pollingInterval)
 	}
+
 	return passed
 }
 
@@ -260,24 +325,8 @@ func put(cl *s3.Client, buc string, key string) string {
 	return *res.ETag
 }
 
-func putGet(cl *s3.Client, buc string, key string) string {
-	kb64 := make([]byte, 32*1024)
-	rand.Read(kb64)
-
-	_, err := cl.PutObject(
-		context.TODO(),
-		&s3.PutObjectInput{
-			Bucket: aws.String(buc),
-			Key:    aws.String(key),
-			Body:   bytes.NewReader(kb64),
-		},
-		WithHeader("Cache-Control", "no-cache"),
-	)
-	if err != nil {
-		log.Printf("unexpected put failed '%v'", err)
-		return ""
-	}
-
+// getEtagWithError returns the ETag and any error encountered
+func getEtagWithError(cl *s3.Client, buc string, key string) (string, error) {
 	og, err := cl.GetObject(context.TODO(),
 		&s3.GetObjectInput{
 			Bucket: aws.String(buc),
@@ -286,29 +335,15 @@ func putGet(cl *s3.Client, buc string, key string) string {
 		WithHeader("Cache-Control", "no-cache"),
 	)
 	if err != nil {
-		log.Printf("unexpected get failed '%v'", err)
-		return ""
+		return "", err
 	}
-
+	defer og.Body.Close()
 	_, _ = io.ReadAll(og.Body)
 
-	return *og.ETag
-}
-
-func getEtag(cl *s3.Client, buc string, key string) string {
-	og, err := cl.GetObject(context.TODO(),
-		&s3.GetObjectInput{
-			Bucket: aws.String(buc),
-			Key:    aws.String(key),
-		},
-		WithHeader("Cache-Control", "no-cache"),
-	)
-	if err != nil {
-		log.Printf("unexpected getObject failed %v", err)
+	if og.ETag == nil {
+		return "", fmt.Errorf("ETag is nil")
 	}
-	_, _ = io.ReadAll(og.Body)
-
-	return *og.ETag
+	return *og.ETag, nil
 }
 
 func putResults(cl *s3.Client, buc string, keys []string) (map[string]string, error) {

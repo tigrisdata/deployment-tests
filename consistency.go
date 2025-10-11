@@ -336,7 +336,7 @@ func putResults(cl *s3.Client, buc string, keys []string) (map[string]string, er
 }
 
 func listResults(cl *s3.Client, buc string, prefix string, limit int) (map[string]string, error) {
-	var keyToETag = make(map[string]string)
+	keyToETag := make(map[string]string)
 	ol, err := cl.ListObjects(
 		context.TODO(),
 		&s3.ListObjectsInput{
@@ -423,7 +423,7 @@ func RunConsistencyTests(t *S3PerformanceTester) bool {
 	}
 
 	// Test US regional endpoints
-	for _, endpoint := range t.config.USEndpoints {
+	for _, endpoint := range t.config.RegionalEndpoints {
 		fmt.Printf("\n%sTesting US Regional Endpoint: %s%s%s\n", ColorBrightWhite, ColorYellow, endpoint, ColorReset)
 		if !runConsistencyTestsForEndpoint(t, endpoint, endpoint) {
 			allPassed = false
@@ -446,7 +446,7 @@ func runConsistencyTestsForEndpoint(t *S3PerformanceTester, endpointName, endpoi
 	regionToClients[endpointURL] = client
 
 	// Add other regional clients if available
-	for _, ep := range t.config.USEndpoints {
+	for _, ep := range t.config.RegionalEndpoints {
 		if ep != endpointName {
 			if regionalClient, exists := t.clients[ep]; exists {
 				regionToClients[ep] = regionalClient

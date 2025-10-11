@@ -42,13 +42,13 @@ var DefaultBenchmarkSizes = []BenchmarkSize{
 
 // TestConfig holds configuration for the performance test
 type TestConfig struct {
-	BucketName      string
-	BenchmarkSizes  []BenchmarkSize // Test configurations for different object sizes
-	Concurrency     int
-	Prefix          string
-	GlobalEndpoint  string
-	USEndpoints     []string
-	RunConnectivity bool
-	RunConsistency  bool
-	RunPerformance  bool
+	BucketName        string
+	BenchmarkSizes    []BenchmarkSize // Test configurations for different object sizes
+	Concurrency       int
+	Prefix            string
+	GlobalEndpoint    string
+	RegionalEndpoints []string
+	RunConnectivity   bool
+	RunConsistency    bool
+	RunPerformance    bool
 }

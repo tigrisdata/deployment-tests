@@ -179,8 +179,8 @@ func NewS3PerformanceTester(cfg TestConfig) (*S3PerformanceTester, error) {
 		})
 	}
 
-	// US regional endpoints clients
-	for _, endpoint := range cfg.USEndpoints {
+	// Regional endpoints clients
+	for _, endpoint := range cfg.RegionalEndpoints {
 		regionalCfg := awsCfg.Copy()
 		regionalCfg.BaseEndpoint = aws.String(endpoint)
 		clients[endpoint] = s3.NewFromConfig(regionalCfg, func(o *s3.Options) {
@@ -281,7 +281,7 @@ func (t *S3PerformanceTester) runConnectivityTests() bool {
 	}
 
 	// Test US regional endpoints
-	for _, endpoint := range t.config.USEndpoints {
+	for _, endpoint := range t.config.RegionalEndpoints {
 		fmt.Printf("\n%sTesting US Regional Endpoint: %s%s%s\n", ColorBrightWhite, ColorYellow, endpoint, ColorReset)
 
 		// Health check test
@@ -360,9 +360,8 @@ func (t *S3PerformanceTester) runPerformanceBenchmarks() bool {
 	fmt.Println(" PERFORMANCE TESTS")
 	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
 
-	// Test all endpoints
+	// Test global endpoint
 	endpoints := []string{"global"}
-	endpoints = append(endpoints, t.config.USEndpoints...)
 
 	for _, endpoint := range endpoints {
 		if endpoint == "global" && t.config.GlobalEndpoint == "" {
@@ -391,14 +390,14 @@ func (t *S3PerformanceTester) runPerformanceBenchmarks() bool {
 			// Display throughput metrics
 			if result.SuccessOps > 0 {
 				if result.ErrorOps > 0 {
-					fmt.Printf("    Throughput - %sMB/s:%s %8.3f, %sops/s:%s %8.3f (%s%d success, %s%d failed%s)\n",
-						ColorBrightWhite, ColorReset, result.ThroughputMBps,
-						ColorBrightWhite, ColorReset, result.OpsPerSecond,
-						ColorBrightGreen, result.SuccessOps, ColorBrightRed, result.ErrorOps, ColorReset)
+					fmt.Printf("    Throughput - %s%8.3f MB/s%s | %s%8.3f ops/s%s | %s%d success, %d failed%s\n",
+						ColorBrightWhite, result.ThroughputMBps, ColorReset,
+						ColorBrightWhite, result.OpsPerSecond, ColorReset,
+						ColorBrightGreen, result.SuccessOps, result.ErrorOps, ColorReset)
 				} else {
-					fmt.Printf("    Throughput - %sMB/s:%s %8.3f, %sops/s:%s %8.3f (%s%d success%s)\n",
-						ColorBrightWhite, ColorReset, result.ThroughputMBps,
-						ColorBrightWhite, ColorReset, result.OpsPerSecond,
+					fmt.Printf("    Throughput - %s%8.3f MB/s%s | %s%8.3f ops/s%s | %s%d success%s\n",
+						ColorBrightWhite, result.ThroughputMBps, ColorReset,
+						ColorBrightWhite, result.OpsPerSecond, ColorReset,
 						ColorBrightGreen, result.SuccessOps, ColorReset)
 				}
 			} else {
@@ -427,14 +426,14 @@ func (t *S3PerformanceTester) runPerformanceBenchmarks() bool {
 			// Display throughput metrics
 			if result.SuccessOps > 0 {
 				if result.ErrorOps > 0 {
-					fmt.Printf("    Throughput - %sMB/s:%s %8.3f, %sops/s:%s %8.3f (%s%d success, %s%d failed%s)\n",
-						ColorBrightWhite, ColorReset, result.ThroughputMBps,
-						ColorBrightWhite, ColorReset, result.OpsPerSecond,
-						ColorBrightGreen, result.SuccessOps, ColorBrightRed, result.ErrorOps, ColorReset)
+					fmt.Printf("    Throughput - %s%8.3f MB/s%s | %s%8.3f ops/s%s | %s%d success, %d failed%s\n",
+						ColorBrightWhite, result.ThroughputMBps, ColorReset,
+						ColorBrightWhite, result.OpsPerSecond, ColorReset,
+						ColorBrightGreen, result.SuccessOps, result.ErrorOps, ColorReset)
 				} else {
-					fmt.Printf("    Throughput - %sMB/s:%s %8.3f, %sops/s:%s %8.3f (%s%d success%s)\n",
-						ColorBrightWhite, ColorReset, result.ThroughputMBps,
-						ColorBrightWhite, ColorReset, result.OpsPerSecond,
+					fmt.Printf("    Throughput - %s%8.3f MB/s%s | %s%8.3f ops/s%s | %s%d success%s\n",
+						ColorBrightWhite, result.ThroughputMBps, ColorReset,
+						ColorBrightWhite, result.OpsPerSecond, ColorReset,
 						ColorBrightGreen, result.SuccessOps, ColorReset)
 				}
 			} else {
@@ -462,7 +461,7 @@ func (t *S3PerformanceTester) RunAllTests() error {
 	}
 	fmt.Printf("\n")
 	fmt.Printf("Global Endpoint: %s%s%s\n", ColorBrightWhite, t.config.GlobalEndpoint, ColorReset)
-	fmt.Printf("US Endpoints: %s%v%s\n", ColorBrightWhite, t.config.USEndpoints, ColorReset)
+	fmt.Printf("Regional Endpoints: %s%v%s\n", ColorBrightWhite, t.config.RegionalEndpoints, ColorReset)
 	fmt.Printf("\n")
 
 	// Track test results
@@ -542,11 +541,11 @@ func (t *S3PerformanceTester) RunAllTests() error {
 func main() {
 	// Parse command line flags
 	var (
-		bucketName     = flag.String("bucket", "", "S3 bucket name (required)")
-		concurrency    = flag.Int("concurrency", 20, "Number of concurrent operations")
-		prefix         = flag.String("prefix", "perf-test", "S3 key prefix")
-		globalEndpoint = flag.String("global-endpoint", "", "Global S3 endpoint URL")
-		usEndpoints    = flag.String("us-endpoints", "", "Comma-separated list of US regional endpoints")
+		bucketName        = flag.String("bucket", "", "S3 bucket name (required)")
+		concurrency       = flag.Int("concurrency", 20, "Number of concurrent operations")
+		prefix            = flag.String("prefix", "perf-test", "S3 key prefix")
+		globalEndpoint    = flag.String("global-endpoint", "", "Global S3 endpoint URL")
+		regionalEndpoints = flag.String("regional-endpoints", "", "Comma-separated list of regional endpoints")
 
 		// Test selection flag
 		tests = flag.String("tests", "all", "Comma-separated list of tests to run: connectivity,consistency,performance (default: all)")
@@ -559,12 +558,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Parse US endpoints
-	var usEndpointList []string
-	if *usEndpoints != "" {
-		usEndpointList = strings.Split(*usEndpoints, ",")
-		for i, endpoint := range usEndpointList {
-			usEndpointList[i] = strings.TrimSpace(endpoint)
+	// Parse regional endpoints
+	var regionalEndpointList []string
+	if *regionalEndpoints != "" {
+		regionalEndpointList = strings.Split(*regionalEndpoints, ",")
+		for i, endpoint := range regionalEndpointList {
+			regionalEndpointList[i] = strings.TrimSpace(endpoint)
 		}
 	}
 
@@ -601,15 +600,15 @@ func main() {
 
 	// Create test configuration
 	config := TestConfig{
-		BucketName:      *bucketName,
-		BenchmarkSizes:  benchmarkSizes,
-		Concurrency:     *concurrency,
-		Prefix:          *prefix,
-		GlobalEndpoint:  *globalEndpoint,
-		USEndpoints:     usEndpointList,
-		RunConnectivity: runConnectivity,
-		RunConsistency:  runConsistency,
-		RunPerformance:  runPerformance,
+		BucketName:        *bucketName,
+		BenchmarkSizes:    benchmarkSizes,
+		Concurrency:       *concurrency,
+		Prefix:            *prefix,
+		GlobalEndpoint:    *globalEndpoint,
+		RegionalEndpoints: regionalEndpointList,
+		RunConnectivity:   runConnectivity,
+		RunConsistency:    runConsistency,
+		RunPerformance:    runPerformance,
 	}
 
 	// Create performance tester

@@ -88,12 +88,10 @@ func applyRemoteRegionsChecks(regionToClients map[string]*s3.Client, regions []s
 
 func applySameRegionsListConsistency(regionToClients map[string]*s3.Client, region string, bucket string) {
 	clog := Start("PUT|LIST (List-After-Write Consistency) Same Region", Opts{ID: "T2", Region: []string{region}})
-	start := time.Now()
 
 	var (
-		err     error
-		resPut  map[string]string
-		resList map[string]string
+		err    error
+		resPut map[string]string
 	)
 
 	for attempts := 0; attempts < 10; attempts++ {
@@ -103,34 +101,20 @@ func applySameRegionsListConsistency(regionToClients map[string]*s3.Client, regi
 		}
 	}
 
-	for attempts := 0; attempts < 10; attempts++ {
-		resList, err = listResults(regionToClients[region], bucket, "list-consistency-", 3)
-		if err == nil {
-			break
-		}
+	attempts, convergenceTime, passed := validateRegionsListEtagWithMetrics(regionToClients[region], bucket, resPut)
+	if !passed {
+		clog.Failf("list results validation failed in region %s", getRegionDisplayName(region))
+		return
 	}
-	if len(resPut) != len(resList) {
-		clog.Failf("list results count missmatch put='%d' list='%d'", len(resPut), len(resList))
+	if attempts == 0 {
+		clog.Successf(0, "List immediately consistent in region %s", getRegionDisplayName(region))
 	} else {
-		for k, v := range resPut {
-			vv, ok := resList[k]
-			if !ok {
-				clog.Failf("list results missing key='%s' put-etag='%s'", k, v)
-				return
-			}
-			if vv != v {
-				clog.Failf("list results etag missmatch key='%s' put-etag='%s' list-etag='%s'", k, v, vv)
-				return
-			}
-		}
+		clog.SuccessAfterf(attempts, convergenceTime, "List converged after %v (attempts: %d) at region %s", convergenceTime, attempts, getRegionDisplayName(region))
 	}
-
-	clog.Successf(time.Since(start), "consistent in all regions'")
 }
 
 func applyDiffRegionsListConsistency(regionToClients map[string]*s3.Client, regions []string, bucket string) {
 	clog := Start("PUT|LIST (List-After-Write Consistency) Diff Region", Opts{ID: "T3", Region: regions})
-	overallStart := time.Now()
 
 	var (
 		err    error
@@ -151,13 +135,11 @@ func applyDiffRegionsListConsistency(regionToClients map[string]*s3.Client, regi
 			continue
 		}
 		if attempts == 0 {
-			clog.Infof("List immediately consistent in region %s", getRegionDisplayName(region))
+			clog.Successf(0, "List immediately consistent in region %s", getRegionDisplayName(region))
 		} else {
-			clog.Infof("List converged after %v (attempts: %d) at region %s", convergenceTime, attempts, getRegionDisplayName(region))
+			clog.SuccessAfterf(attempts, convergenceTime, "List converged after %v (attempts: %d) at region %s", convergenceTime, attempts, getRegionDisplayName(region))
 		}
 	}
-
-	clog.Successf(time.Since(overallStart), "consistent in all regions'")
 }
 
 // validateRegionsListEtagWithMetrics validates list consistency and returns metrics
@@ -235,8 +217,6 @@ func validateRegionsListEtagWithMetrics(s3client *s3.Client, bucket string, resP
 }
 
 func validateETag(s3Client *s3.Client, sourceRegion string, remoteRegion string, bucket string, key string, expectedEtag string, clog *Logger) bool {
-	clog.Infof("attempting read in remote region %s%s%s now\n", ColorYellow, getRegionDisplayName(remoteRegion), ColorReset)
-
 	const (
 		maxDuration     = 1 * time.Minute
 		pollingInterval = 100 * time.Millisecond
@@ -253,8 +233,6 @@ func validateETag(s3Client *s3.Client, sourceRegion string, remoteRegion string,
 		eTagRemote, err := getEtagWithError(s3Client, bucket, key)
 		// Handle errors - distinguish from ETag mismatch
 		if err != nil {
-			clog.Infof("attempt '%d' GetObject failed: %v (will retry)", attempts, err)
-
 			// Check timeout before continuing
 			if !firstPollTime.IsZero() && time.Since(firstPollTime) > maxDuration {
 				clog.Failf("timeout after %v waiting for ETag=%s written-to=%s replicated-to=%s",
@@ -286,9 +264,6 @@ func validateETag(s3Client *s3.Client, sourceRegion string, remoteRegion string,
 			passed = true
 			break
 		}
-
-		clog.Infof("retrying attempt '%d' waiting for ETag=%s written-to=%s replicated-to=%s dest has ETag=%s",
-			attempts, expectedEtag, getRegionDisplayName(sourceRegion), getRegionDisplayName(remoteRegion), eTagRemote)
 
 		// Check timeout before next attempt
 		if time.Since(firstPollTime) > maxDuration {

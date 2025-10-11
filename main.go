@@ -134,16 +134,16 @@ type BenchmarkResult struct {
 	OpsPerSecond float64
 }
 
-// S3PerformanceTester handles S3 performance testing
-type S3PerformanceTester struct {
+// TigrisValidator handles Tigris performance testing
+type TigrisValidator struct {
 	config  TestConfig
 	results []TestResult
 	mu      sync.RWMutex
 	clients map[string]*s3.Client
 }
 
-// NewS3PerformanceTester creates a new S3 performance tester
-func NewS3PerformanceTester(cfg TestConfig) (*S3PerformanceTester, error) {
+// NewTigrisValidator creates a new Tigris validator
+func NewTigrisValidator(cfg TestConfig) (*TigrisValidator, error) {
 	// Create optimized HTTP client for high-throughput scenarios
 	httpClient := &http.Client{
 		Transport: &http.Transport{
@@ -188,7 +188,7 @@ func NewS3PerformanceTester(cfg TestConfig) (*S3PerformanceTester, error) {
 		})
 	}
 
-	return &S3PerformanceTester{
+	return &TigrisValidator{
 		config:  cfg,
 		results: make([]TestResult, 0),
 		clients: clients,
@@ -196,7 +196,7 @@ func NewS3PerformanceTester(cfg TestConfig) (*S3PerformanceTester, error) {
 }
 
 // testHealthEndpoint tests health endpoint connectivity for a given S3 endpoint
-func (t *S3PerformanceTester) testHealthEndpoint(s3Endpoint string) (time.Duration, error) {
+func (t *TigrisValidator) testHealthEndpoint(s3Endpoint string) (time.Duration, error) {
 	// Construct health endpoint URL by appending /admin/health to the S3 endpoint
 	healthURL := strings.TrimSuffix(s3Endpoint, "/") + "/admin/health"
 
@@ -234,7 +234,7 @@ func (t *S3PerformanceTester) testHealthEndpoint(s3Endpoint string) (time.Durati
 }
 
 // testS3Connectivity tests S3 connectivity to an endpoint
-func (t *S3PerformanceTester) testS3Connectivity(endpoint string) (time.Duration, error) {
+func (t *TigrisValidator) testS3Connectivity(endpoint string) (time.Duration, error) {
 	client, exists := t.clients[endpoint]
 	if !exists {
 		return 0, fmt.Errorf("no client for endpoint: %s", endpoint)
@@ -250,7 +250,7 @@ func (t *S3PerformanceTester) testS3Connectivity(endpoint string) (time.Duration
 }
 
 // runConnectivityTests runs connectivity tests
-func (t *S3PerformanceTester) runConnectivityTests() bool {
+func (t *TigrisValidator) runConnectivityTests() bool {
 	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
 	fmt.Println(" CONNECTIVITY TESTS")
 	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
@@ -307,7 +307,7 @@ func (t *S3PerformanceTester) runConnectivityTests() bool {
 }
 
 // runPerformanceBenchmark runs a single benchmark that collects both latency and throughput metrics
-func (t *S3PerformanceTester) runPerformanceBenchmark(operation string, size BenchmarkSize, endpoint string) workload.BenchmarkResult {
+func (t *TigrisValidator) runPerformanceBenchmark(operation string, size BenchmarkSize, endpoint string) workload.BenchmarkResult {
 	// Determine operation type
 	var opType workload.OpType
 	if operation == "PUT" {
@@ -355,7 +355,7 @@ func (t *S3PerformanceTester) runPerformanceBenchmark(operation string, size Ben
 }
 
 // runPerformanceBenchmarks runs all performance benchmarks (latency and throughput)
-func (t *S3PerformanceTester) runPerformanceBenchmarks() bool {
+func (t *TigrisValidator) runPerformanceBenchmarks() bool {
 	fmt.Printf("\n%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
 	fmt.Println(" PERFORMANCE TESTS")
 	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
@@ -448,8 +448,8 @@ func (t *S3PerformanceTester) runPerformanceBenchmarks() bool {
 }
 
 // RunAllTests runs the complete test suite
-func (t *S3PerformanceTester) RunAllTests() error {
-	fmt.Printf("Starting S3 Performance Test Suite...\n")
+func (t *TigrisValidator) RunAllTests() error {
+	fmt.Printf("Starting Tigris Performance Test Suite...\n")
 	fmt.Printf("Bucket: %s%s%s\n", ColorBrightWhite, t.config.BucketName, ColorReset)
 	fmt.Printf("Concurrency: %s%d%s\n", ColorBrightWhite, t.config.Concurrency, ColorReset)
 	fmt.Printf("Benchmark Sizes: ")
@@ -541,11 +541,11 @@ func (t *S3PerformanceTester) RunAllTests() error {
 func main() {
 	// Parse command line flags
 	var (
-		bucketName        = flag.String("bucket", "", "S3 bucket name (required)")
+		bucketName        = flag.String("bucket", "", "Bucket name (required)")
 		concurrency       = flag.Int("concurrency", 20, "Number of concurrent operations")
-		prefix            = flag.String("prefix", "perf-test", "S3 key prefix")
-		globalEndpoint    = flag.String("global-endpoint", "", "Global S3 endpoint URL")
-		regionalEndpoints = flag.String("regional-endpoints", "", "Comma-separated list of regional endpoints")
+		prefix            = flag.String("prefix", "perf-test", "Object key prefix")
+		globalEndpoint    = flag.String("global-endpoint", "", "Global Tigris endpoint URL")
+		regionalEndpoints = flag.String("regional-endpoints", "", "Comma-separated list of regional Tigris endpoints")
 
 		// Test selection flag
 		tests = flag.String("tests", "all", "Comma-separated list of tests to run: connectivity,consistency,performance (default: all)")
@@ -612,9 +612,9 @@ func main() {
 	}
 
 	// Create performance tester
-	tester, err := NewS3PerformanceTester(config)
+	tester, err := NewTigrisValidator(config)
 	if err != nil {
-		log.Fatalf("Failed to create S3 performance tester: %v", err)
+		log.Fatalf("Failed to create Tigris validator: %v", err)
 	}
 
 	// Run all tests

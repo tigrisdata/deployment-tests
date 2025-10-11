@@ -407,7 +407,7 @@ func (c *Logger) SuccessAfterf(attempts int, duration time.Duration, format stri
 }
 
 // RunConsistencyTests runs the existing consistency tests
-func RunConsistencyTests(t *S3PerformanceTester) bool {
+func RunConsistencyTests(t *TigrisValidator) bool {
 	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
 	fmt.Printf(" %sCONSISTENCY TESTS%s\n", ColorBrightWhite, ColorReset)
 	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
@@ -434,7 +434,7 @@ func RunConsistencyTests(t *S3PerformanceTester) bool {
 }
 
 // runConsistencyTestsForEndpoint runs consistency tests for a specific endpoint
-func runConsistencyTestsForEndpoint(t *S3PerformanceTester, endpointName, endpointURL string) bool {
+func runConsistencyTestsForEndpoint(t *TigrisValidator, endpointName, endpointURL string) bool {
 	client, exists := t.clients[endpointName]
 	if !exists {
 		fmt.Printf("  %sNo client available for endpoint%s\n", ColorBrightRed, ColorReset)

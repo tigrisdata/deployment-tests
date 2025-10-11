@@ -422,9 +422,9 @@ func RunConsistencyTests(t *TigrisValidator) bool {
 		}
 	}
 
-	// Test US regional endpoints
+	// Test Regional endpoints
 	for _, endpoint := range t.config.RegionalEndpoints {
-		fmt.Printf("\n%sTesting US Regional Endpoint: %s%s%s\n", ColorBrightWhite, ColorYellow, endpoint, ColorReset)
+		fmt.Printf("\n%sTesting Regional Endpoint: %s%s%s\n", ColorBrightWhite, ColorYellow, endpoint, ColorReset)
 		if !runConsistencyTestsForEndpoint(t, endpoint, endpoint) {
 			allPassed = false
 		}

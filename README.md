@@ -30,7 +30,7 @@ The test suite includes four types of tests that can be run independently or tog
 ## Features
 
 - **Configurable Test Selection**: Run specific test suites or all tests together
-- **Multi-Endpoint Testing**: Tests global and multiple US regional endpoints
+- **Multi-Endpoint Testing**: Tests global and multiple regional endpoints
 - **Consistency Testing**: Validates read-after-write and multi-region consistency
 - **Comprehensive Metrics**: Detailed latency percentiles (Avg, P95, P99), TTFB, throughput, and error rates
 - **Configurable Concurrency**: Adjustable concurrent operations for realistic load testing

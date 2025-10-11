@@ -8,7 +8,6 @@ The test suite includes four types of tests that can be run independently or tog
 
 ### **Connectivity Tests**
 
-- **Health Check**: Tests health endpoint connectivity on each Tigris endpoint
 - **S3 Connectivity**: Tests service connectivity using HeadBucket operations
 
 ### **Consistency Tests**
@@ -142,11 +141,9 @@ CONNECTIVITY TESTS
 ================================================================================
 
 Testing Global Endpoint: https://t3.storage.dev
-  Health Check: SUCCESS - 15.2ms
   S3 Connectivity: SUCCESS - 245ms
 
 Testing Regional Endpoint: https://sjc.storage.dev
-  Health Check: SUCCESS - 12.8ms
   S3 Connectivity: SUCCESS - 198ms
 ```
 

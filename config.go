@@ -30,14 +30,14 @@ var DefaultBenchmarkSizes = []BenchmarkSize{
 		UseMultipart:  false,
 		MultipartSize: 0,
 	},
-	// {
-	// 	ObjectSize:    100 * 1024 * 1024, // 100 MiB
-	// 	DisplayName:   "100 MiB",
-	// 	RecordCount:   10,              // 10 records = ~1 GB dataset
-	// 	OpCount:       100,             // 100 ops
-	// 	UseMultipart:  true,            // Enable multipart for large objects
-	// 	MultipartSize: 10 * 1024 * 1024, // 10 MiB parts (AWS minimum is 5 MiB)
-	// },
+	{
+		ObjectSize:    100 * 1024 * 1024, // 100 MiB
+		DisplayName:   "100 MiB",
+		RecordCount:   10,               // 10 records = ~1 GB dataset
+		OpCount:       100,              // 100 ops
+		UseMultipart:  true,             // Enable multipart for large objects
+		MultipartSize: 10 * 1024 * 1024, // 10 MiB parts (AWS minimum is 5 MiB)
+	},
 }
 
 // TestConfig holds configuration for the performance test

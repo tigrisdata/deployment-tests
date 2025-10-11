@@ -159,31 +159,31 @@ CONSISTENCY TESTS
 Testing Global Endpoint: https://t3.storage.dev
 
 PUT|GET (Read-After-Write Consistency) (50 iterations)
-  t3 -> t3 (50 iterations)
+  global -> global (50 iterations)
     Convergence - Avg:       0s, P95:       0s, P99:       0s
     Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
-  t3 -> iad (50 iterations)
+  global -> iad (50 iterations)
     Convergence - Avg: 406.000ms, P95: 900.000ms, P99:   1.100s
     Distribution - Immediate:   0.0%, Eventual: 100.0%, Timeout:   0.0%
-  t3 -> ord1 (50 iterations)
+  global -> ord1 (50 iterations)
     Convergence - Avg:  7.000ms, P95: 100.000ms, P99: 200.000ms
     Distribution - Immediate:  95.0%, Eventual:   5.0%, Timeout:   0.0%
-  t3 -> sjc (50 iterations)
+  global -> sjc (50 iterations)
     Convergence - Avg:       0s, P95:       0s, P99:       0s
     Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
   SUCCESS - Read-After-Write Consistency test completed (145.779s)
 
 PUT|LIST (List-After-Write Consistency) (50 iterations)
-  t3 -> t3 (50 iterations)
+  global -> global (50 iterations)
     Convergence - Avg:       0s, P95:       0s, P99:       0s
     Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
-  t3 -> iad (50 iterations)
+  global -> iad (50 iterations)
     Convergence - Avg: 500.000ms, P95:   1.000s, P99:   1.500s
     Distribution - Immediate:   0.0%, Eventual: 100.0%, Timeout:   0.0%
-  t3 -> ord1 (50 iterations)
+  global -> ord1 (50 iterations)
     Convergence - Avg:       0s, P95:       0s, P99:       0s
     Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
-  t3 -> sjc (50 iterations)
+  global -> sjc (50 iterations)
     Convergence - Avg:       0s, P95:       0s, P99:       0s
     Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
   SUCCESS - List-After-Write Consistency test completed (52.3s)

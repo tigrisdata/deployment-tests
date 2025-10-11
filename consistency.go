@@ -100,9 +100,14 @@ func getRegionDisplayName(region string) string {
 		urlPart := strings.TrimPrefix(region, "https://")
 		parts := strings.Split(urlPart, ".")
 		if len(parts) > 0 {
-			return parts[0]
+			displayName := parts[0]
+			if displayName == "t3" || displayName == "oracle" {
+				return "global"
+			}
+			return displayName
 		}
 	}
+
 	return region
 }
 

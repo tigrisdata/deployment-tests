@@ -230,8 +230,6 @@ The tool uses the AWS SDK for Go v2, which supports multiple credential sources:
 
 1. Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
 2. AWS credentials file (`~/.aws/credentials`)
-3. IAM roles (if running on EC2)
-4. AWS SSO
 
 ## Performance Considerations
 

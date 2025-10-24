@@ -486,7 +486,7 @@ func main() {
 	var (
 		bucketName        = flag.String("bucket", "", "Bucket name (required)")
 		concurrency       = flag.Int("concurrency", 20, "Number of concurrent operations")
-		prefix            = flag.String("prefix", "perf-test", "Object key prefix")
+		prefix            = flag.String("prefix", "t3-validator", "Object key prefix")
 		globalEndpoint    = flag.String("global-endpoint", "https://t3.storage.dev", "Global Tigris endpoint URL")
 		regionalEndpoints = flag.String("regional-endpoints", "https://iad1.storage.dev,https://ord1.storage.dev,https://sjc.storage.dev", "Comma-separated list of regional Tigris endpoints")
 

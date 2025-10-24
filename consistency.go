@@ -14,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go/transport/http"
+	"github.com/google/uuid"
 )
 
 // ConvergenceMetric represents a single convergence measurement
@@ -117,7 +118,7 @@ func WithHeader(key, value string) func(*s3.Options) {
 	}
 }
 
-func applyRemoteRegionsChecks(regionToClients map[string]*s3.Client, regions []string, bucket string, key string) {
+func applyRemoteRegionsChecks(regionToClients map[string]*s3.Client, regions []string, bucket string, basePrefix string, runID string) {
 	const iterations = 50
 
 	clog := Start(fmt.Sprintf("PUT|GET (Read-After-Write Consistency) (%d iterations)", iterations), Opts{ID: "T1", Region: regions})
@@ -131,8 +132,8 @@ func applyRemoteRegionsChecks(regionToClients map[string]*s3.Client, regions []s
 
 	// Run multiple iterations
 	for iter := 0; iter < iterations; iter++ {
-		// Use unique key for each iteration
-		iterKey := fmt.Sprintf("%s-iter-%d", key, iter)
+		// Use unique key for each iteration with run ID for isolation
+		iterKey := fmt.Sprintf("%s/%s/consistency-test-iter-%d", basePrefix, runID, iter)
 
 		eTagToValidate := put(regionToClients[regions[0]], bucket, iterKey)
 		if eTagToValidate == "" {
@@ -156,7 +157,7 @@ func applyRemoteRegionsChecks(regionToClients map[string]*s3.Client, regions []s
 	clog.Successf(time.Since(overallStart), "Read-After-Write Consistency test completed")
 }
 
-func applyListConsistencyChecks(regionToClients map[string]*s3.Client, regions []string, bucket string) {
+func applyListConsistencyChecks(regionToClients map[string]*s3.Client, regions []string, bucket string, basePrefix string, runID string) {
 	const iterations = 10
 
 	clog := Start(fmt.Sprintf("PUT|LIST (List-After-Write Consistency) (%d iterations)", iterations), Opts{ID: "T2", Region: regions})
@@ -170,8 +171,8 @@ func applyListConsistencyChecks(regionToClients map[string]*s3.Client, regions [
 
 	// Run multiple iterations
 	for iter := 0; iter < iterations; iter++ {
-		// Create unique prefix and keys for this iteration
-		prefix := fmt.Sprintf("list-iter-%d-", iter)
+		// Create unique prefix and keys for this iteration with run ID for isolation
+		prefix := fmt.Sprintf("%s/%s/list-iter-%d-", basePrefix, runID, iter)
 		keys := []string{
 			fmt.Sprintf("%sobj-1", prefix),
 			fmt.Sprintf("%sobj-2", prefix),
@@ -598,8 +599,11 @@ func runConsistencyTestsForEndpoint(t *TigrisValidator, endpointName, endpointUR
 	// Track if any test fails
 	allPassed := true
 
-	applyRemoteRegionsChecks(regionToClients, regions, t.config.BucketName, fmt.Sprintf("%s/consistency-test", t.config.Prefix))
-	applyListConsistencyChecks(regionToClients, regions, t.config.BucketName)
+	// Generate unique run ID for this test run to ensure isolation
+	runID := uuid.New().String()
+
+	applyRemoteRegionsChecks(regionToClients, regions, t.config.BucketName, t.config.Prefix, runID)
+	applyListConsistencyChecks(regionToClients, regions, t.config.BucketName, t.config.Prefix, runID)
 
 	return allPassed
 }

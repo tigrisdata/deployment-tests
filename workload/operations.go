@@ -3,6 +3,7 @@ package workload
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -73,7 +74,7 @@ func NewS3Operations(client *s3.Client, bucketName string, useMultipart bool, mu
 	// Create AWS SDK's built-in uploader with optimized settings
 	uploader := manager.NewUploader(client, func(u *manager.Uploader) {
 		u.PartSize = multipartSize
-		u.Concurrency = 10          // Upload up to 10 parts in parallel
+		u.Concurrency = 50          // Upload up to 50 parts in parallel for high throughput
 		u.LeavePartsOnError = false // Clean up failed uploads
 	})
 
@@ -143,6 +144,58 @@ func (ops *S3Operations) putObjectMultipart(ctx context.Context, key string, dat
 		Duration:  duration,
 		BytesRead: int64(len(data)),
 		Error:     err,
+	}
+}
+
+// PutObjectStreaming uploads an object to S3 from an io.Reader (streaming)
+// This is memory-efficient for large objects as data is generated/read on-demand
+// Always uses multipart upload for streaming to handle objects of any size
+func (ops *S3Operations) PutObjectStreaming(ctx context.Context, key string, reader io.Reader, size int64) OperationResult {
+	start := time.Now()
+
+	// Use AWS SDK's built-in uploader for streaming
+	_, err := ops.uploader.Upload(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(ops.bucketName),
+		Key:    aws.String(key),
+		Body:   reader,
+	})
+
+	duration := time.Since(start)
+
+	return OperationResult{
+		Success:   err == nil,
+		Duration:  duration,
+		BytesRead: size,
+		Error:     err,
+	}
+}
+
+// PutObjectAuto automatically chooses between byte slice and streaming upload
+// based on the data type returned by GenerateRandomData()
+func (ops *S3Operations) PutObjectAuto(ctx context.Context, key string, size int64) OperationResult {
+	// Generate data using automatic optimization
+	data, err := GenerateRandomData(size)
+	if err != nil {
+		return OperationResult{
+			Success: false,
+			Error:   err,
+		}
+	}
+
+	// Check if it's a reader (large object) or byte slice (small object)
+	if reader, ok := data.(io.Reader); ok {
+		// Large object: streaming upload
+		return ops.PutObjectStreaming(ctx, key, reader, size)
+	}
+
+	// Small object: byte slice upload
+	if byteData, ok := data.([]byte); ok {
+		return ops.PutObject(ctx, key, byteData)
+	}
+
+	return OperationResult{
+		Success: false,
+		Error:   fmt.Errorf("unexpected data type: %T", data),
 	}
 }
 
@@ -231,6 +284,59 @@ func (ops *S3Operations) getObjectParallel(ctx context.Context, key string) Oper
 		Duration:  duration,
 		TTFB:      ttfb,
 		BytesRead: bytesDownloaded,
+		Error:     err,
+	}
+}
+
+// GetObjectRange downloads a specific byte range from an object in S3
+// This is used for simulating video transcoding where encoders read chunks of source files
+func (ops *S3Operations) GetObjectRange(ctx context.Context, key string, startByte, endByte int64) OperationResult {
+	start := time.Now()
+
+	// Create range header (e.g., "bytes=0-1048575" for first 1MB)
+	rangeHeader := aws.String(fmt.Sprintf("bytes=%d-%d", startByte, endByte))
+
+	resp, err := ops.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(ops.bucketName),
+		Key:    aws.String(key),
+		Range:  rangeHeader,
+	})
+
+	var ttfb time.Duration
+	var bytesRead int64
+
+	if err == nil && resp.Body != nil {
+		// TTFB is measured when we get the response
+		ttfb = time.Since(start)
+
+		// Get buffer from pool for reading
+		bufPtr := bufferPool.Get().(*[]byte)
+		buf := *bufPtr
+
+		// Read the entire range using pooled buffer
+		for {
+			n, readErr := resp.Body.Read(buf)
+			bytesRead += int64(n)
+			if readErr != nil {
+				if readErr != io.EOF {
+					err = readErr
+				}
+				break
+			}
+		}
+
+		// Return buffer to pool for reuse
+		bufferPool.Put(bufPtr)
+		resp.Body.Close()
+	}
+
+	duration := time.Since(start)
+
+	return OperationResult{
+		Success:   err == nil,
+		Duration:  duration,
+		TTFB:      ttfb,
+		BytesRead: bytesRead,
 		Error:     err,
 	}
 }

@@ -49,6 +49,18 @@ func (t *PerformanceTest) Run(ctx context.Context) TestStatus {
 	fmt.Println(" PERFORMANCE TESTS")
 	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
 
+	// Display test configuration
+	fmt.Printf("\nConfiguration:\n")
+	fmt.Printf("  Concurrency: %d\n", t.validator.config.Concurrency)
+	fmt.Printf("  Benchmark Sizes: ")
+	for i, size := range t.validator.config.BenchmarkSizes {
+		if i > 0 {
+			fmt.Printf(", ")
+		}
+		fmt.Printf("%s", size.DisplayName)
+	}
+	fmt.Printf("\n")
+
 	allPassed := true
 	details := make(map[string]interface{})
 

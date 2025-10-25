@@ -330,7 +330,6 @@ func (t *TranscodeTest) runTranscodeSimulation(ctx context.Context) (*TranscodeM
 					outputKey := fmt.Sprintf("%s/transcode/outputs/video-%03d/segment-%d-%d.bin",
 						t.validator.config.Prefix, sourceIdx, jobID, time.Now().UnixNano())
 
-					writeStart := time.Now()
 					writeResult := ops.PutObject(simCtx, outputKey, segmentData)
 
 					// Collect metrics without locks
@@ -343,8 +342,9 @@ func (t *TranscodeTest) runTranscodeSimulation(ctx context.Context) (*TranscodeM
 
 					// 3. Immediately read back to check consistency
 					if writeResult.Success {
+						readStart := time.Now()
 						readBackResult := ops.GetObject(simCtx, outputKey)
-						readBackLatency := time.Since(writeStart)
+						readBackLatency := time.Since(readStart)
 
 						// Collect metrics without locks
 						if readBackResult.Success {

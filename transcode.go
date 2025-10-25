@@ -66,16 +66,13 @@ func (t *TranscodeTest) Type() TestType {
 	return TestTypeTranscode
 }
 
-// Setup performs preload of source files
+// Setup performs preload of source files using per-worker S3 clients
 func (t *TranscodeTest) Setup(ctx context.Context) error {
 	cfg := t.validator.config.TranscodeConfig
-	client := t.validator.clients["global"]
+	baseClient := t.validator.clients["global"]
 
 	fmt.Printf("\n%sSetup Phase: Uploading %d source files (%s each)...%s\n",
 		ColorBrightWhite, cfg.SourceFileCount, formatBytes(cfg.SourceFileSize), ColorReset)
-
-	// Create S3 operations wrapper with multipart upload
-	ops := workload.NewS3Operations(client, t.validator.config.BucketName, true, 10*1024*1024)
 
 	start := time.Now()
 	var completed int32
@@ -88,6 +85,11 @@ func (t *TranscodeTest) Setup(ctx context.Context) error {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
+
+			// Create per-worker S3 client for isolated connection pool
+			// This prevents connection pool contention between parallel uploads
+			workerClient := workload.CreateWorkerS3Client(baseClient)
+			ops := workload.NewS3Operations(workerClient, t.validator.config.BucketName, true, 10*1024*1024)
 
 			key := fmt.Sprintf("%s/transcode/sources/video-%03d.bin", t.validator.config.Prefix, idx)
 
@@ -236,25 +238,36 @@ func (t *TranscodeTest) Cleanup(ctx context.Context) error {
 	return nil
 }
 
+// workerTranscodeMetrics holds per-worker metrics to avoid lock contention
+type workerTranscodeMetrics struct {
+	readLatencies  []time.Duration
+	readTTFBs      []time.Duration
+	writeLatencies []time.Duration
+	consLatencies  []time.Duration
+	readSuccess    int64
+	readErrors     int64
+	writeSuccess   int64
+	writeErrors    int64
+	consImmediate  int64
+	consEventual   int64
+	consFailed     int64
+}
+
 // runTranscodeSimulation simulates the transcoding workload
 func (t *TranscodeTest) runTranscodeSimulation(ctx context.Context) (*TranscodeMetrics, *TranscodeMetrics, *ConsistencyMetrics) {
 	cfg := t.validator.config.TranscodeConfig
-	client := t.validator.clients["global"]
-	ops := workload.NewS3Operations(client, t.validator.config.BucketName, false, 0)
-
-	// Metrics collection
-	readMetrics := &TranscodeMetrics{Latencies: []time.Duration{}, TTFBs: []time.Duration{}}
-	writeMetrics := &TranscodeMetrics{Latencies: []time.Duration{}, TTFBs: []time.Duration{}}
-	consistencyMetrics := &ConsistencyMetrics{Latencies: []time.Duration{}}
-
-	var readMu, writeMu, consMu sync.Mutex
+	baseClient := t.validator.clients["global"]
 
 	// Create context with timeout
 	simCtx, cancel := context.WithTimeout(ctx, cfg.TestDuration)
 	defer cancel()
 
+	// Estimate operations per worker for pre-allocation
+	// Assume ~1 op/second per worker for duration = ~300 ops for 5 minutes
+	estimatedOpsPerWorker := int(cfg.TestDuration.Seconds())
+
 	var wg sync.WaitGroup
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	workerMetricsChan := make(chan *workerTranscodeMetrics, cfg.JobCount)
 
 	// Start worker jobs
 	for i := 0; i < cfg.JobCount; i++ {
@@ -262,15 +275,32 @@ func (t *TranscodeTest) runTranscodeSimulation(ctx context.Context) (*TranscodeM
 		go func(jobID int) {
 			defer wg.Done()
 
+			// Create per-worker S3 client for isolated connection pool
+			workerClient := workload.CreateWorkerS3Client(baseClient)
+			ops := workload.NewS3Operations(workerClient, t.validator.config.BucketName, false, 0)
+
+			// Create per-worker RNG to avoid global lock contention
+			workerRng := rand.New(rand.NewSource(time.Now().UnixNano() + int64(jobID)))
+
+			// Per-worker metrics (no locks needed!)
+			localMetrics := &workerTranscodeMetrics{
+				readLatencies:  make([]time.Duration, 0, estimatedOpsPerWorker),
+				readTTFBs:      make([]time.Duration, 0, estimatedOpsPerWorker),
+				writeLatencies: make([]time.Duration, 0, estimatedOpsPerWorker),
+				consLatencies:  make([]time.Duration, 0, estimatedOpsPerWorker),
+			}
+
 			for {
 				select {
 				case <-simCtx.Done():
+					// Send worker metrics to aggregation channel
+					workerMetricsChan <- localMetrics
 					return
 				default:
 					// Simulate encoder reading a chunk and writing output
 
 					// 1. Read a chunk from random source file (range GET)
-					sourceIdx := rng.Intn(cfg.SourceFileCount)
+					sourceIdx := workerRng.Intn(cfg.SourceFileCount)
 					sourceKey := fmt.Sprintf("%s/transcode/sources/video-%03d.bin", t.validator.config.Prefix, sourceIdx)
 
 					// Calculate random offset within source file
@@ -278,26 +308,24 @@ func (t *TranscodeTest) runTranscodeSimulation(ctx context.Context) (*TranscodeM
 					if maxOffset < 0 {
 						maxOffset = 0
 					}
-					startByte := rng.Int63n(maxOffset + 1)
+					startByte := workerRng.Int63n(maxOffset + 1)
 					endByte := startByte + cfg.ChunkSize - 1
 
 					readResult := ops.GetObjectRange(simCtx, sourceKey, startByte, endByte)
 
-					readMu.Lock()
-					atomic.AddInt64(&readMetrics.TotalOps, 1)
+					// Collect metrics without locks
 					if readResult.Success {
-						atomic.AddInt64(&readMetrics.SuccessOps, 1)
-						readMetrics.Latencies = append(readMetrics.Latencies, readResult.Duration)
-						readMetrics.TTFBs = append(readMetrics.TTFBs, readResult.TTFB)
+						localMetrics.readSuccess++
+						localMetrics.readLatencies = append(localMetrics.readLatencies, readResult.Duration)
+						localMetrics.readTTFBs = append(localMetrics.readTTFBs, readResult.TTFB)
 					} else {
-						atomic.AddInt64(&readMetrics.ErrorOps, 1)
+						localMetrics.readErrors++
 					}
-					readMu.Unlock()
 
 					// 2. Write output segment (small file)
-					segmentSize := cfg.SegmentSizeMin + rng.Int63n(cfg.SegmentSizeMax-cfg.SegmentSizeMin+1)
+					segmentSize := cfg.SegmentSizeMin + workerRng.Int63n(cfg.SegmentSizeMax-cfg.SegmentSizeMin+1)
 					segmentData := make([]byte, segmentSize)
-					rand.Read(segmentData)
+					workerRng.Read(segmentData) // Use worker RNG, not global
 
 					outputKey := fmt.Sprintf("%s/transcode/outputs/video-%03d/segment-%d-%d.bin",
 						t.validator.config.Prefix, sourceIdx, jobID, time.Now().UnixNano())
@@ -305,34 +333,30 @@ func (t *TranscodeTest) runTranscodeSimulation(ctx context.Context) (*TranscodeM
 					writeStart := time.Now()
 					writeResult := ops.PutObject(simCtx, outputKey, segmentData)
 
-					writeMu.Lock()
-					atomic.AddInt64(&writeMetrics.TotalOps, 1)
+					// Collect metrics without locks
 					if writeResult.Success {
-						atomic.AddInt64(&writeMetrics.SuccessOps, 1)
-						writeMetrics.Latencies = append(writeMetrics.Latencies, writeResult.Duration)
+						localMetrics.writeSuccess++
+						localMetrics.writeLatencies = append(localMetrics.writeLatencies, writeResult.Duration)
 					} else {
-						atomic.AddInt64(&writeMetrics.ErrorOps, 1)
+						localMetrics.writeErrors++
 					}
-					writeMu.Unlock()
 
 					// 3. Immediately read back to check consistency
 					if writeResult.Success {
 						readBackResult := ops.GetObject(simCtx, outputKey)
 						readBackLatency := time.Since(writeStart)
 
-						consMu.Lock()
-						atomic.AddInt64(&consistencyMetrics.TotalChecks, 1)
+						// Collect metrics without locks
 						if readBackResult.Success {
-							consistencyMetrics.Latencies = append(consistencyMetrics.Latencies, readBackLatency)
+							localMetrics.consLatencies = append(localMetrics.consLatencies, readBackLatency)
 							if readBackLatency < 200*time.Millisecond {
-								atomic.AddInt64(&consistencyMetrics.ImmediateReads, 1)
+								localMetrics.consImmediate++
 							} else {
-								atomic.AddInt64(&consistencyMetrics.EventualReads, 1)
+								localMetrics.consEventual++
 							}
 						} else {
-							atomic.AddInt64(&consistencyMetrics.FailedReads, 1)
+							localMetrics.consFailed++
 						}
-						consMu.Unlock()
 					}
 				}
 			}
@@ -340,6 +364,40 @@ func (t *TranscodeTest) runTranscodeSimulation(ctx context.Context) (*TranscodeM
 	}
 
 	wg.Wait()
+	close(workerMetricsChan)
+
+	// Aggregate metrics from all workers
+	readMetrics := &TranscodeMetrics{}
+	writeMetrics := &TranscodeMetrics{}
+	consistencyMetrics := &ConsistencyMetrics{}
+
+	// Estimate total capacity for pre-allocation
+	totalOps := estimatedOpsPerWorker * cfg.JobCount
+	readMetrics.Latencies = make([]time.Duration, 0, totalOps)
+	readMetrics.TTFBs = make([]time.Duration, 0, totalOps)
+	writeMetrics.Latencies = make([]time.Duration, 0, totalOps)
+	consistencyMetrics.Latencies = make([]time.Duration, 0, totalOps)
+
+	// Combine all worker metrics
+	for workerMetrics := range workerMetricsChan {
+		// Aggregate read metrics
+		readMetrics.SuccessOps += workerMetrics.readSuccess
+		readMetrics.ErrorOps += workerMetrics.readErrors
+		readMetrics.Latencies = append(readMetrics.Latencies, workerMetrics.readLatencies...)
+		readMetrics.TTFBs = append(readMetrics.TTFBs, workerMetrics.readTTFBs...)
+
+		// Aggregate write metrics
+		writeMetrics.SuccessOps += workerMetrics.writeSuccess
+		writeMetrics.ErrorOps += workerMetrics.writeErrors
+		writeMetrics.Latencies = append(writeMetrics.Latencies, workerMetrics.writeLatencies...)
+
+		// Aggregate consistency metrics
+		consistencyMetrics.ImmediateReads += workerMetrics.consImmediate
+		consistencyMetrics.EventualReads += workerMetrics.consEventual
+		consistencyMetrics.FailedReads += workerMetrics.consFailed
+		consistencyMetrics.TotalChecks += workerMetrics.consImmediate + workerMetrics.consEventual + workerMetrics.consFailed
+		consistencyMetrics.Latencies = append(consistencyMetrics.Latencies, workerMetrics.consLatencies...)
+	}
 
 	// Calculate statistics
 	t.calculateMetrics(readMetrics, cfg.TestDuration)

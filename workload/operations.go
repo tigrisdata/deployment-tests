@@ -74,7 +74,7 @@ func NewS3Operations(client *s3.Client, bucketName string, useMultipart bool, mu
 	// Create AWS SDK's built-in uploader with optimized settings
 	uploader := manager.NewUploader(client, func(u *manager.Uploader) {
 		u.PartSize = multipartSize
-		u.Concurrency = 10          // Upload up to 10 parts in parallel
+		u.Concurrency = 50          // Upload up to 50 parts in parallel for high throughput
 		u.LeavePartsOnError = false // Clean up failed uploads
 	})
 

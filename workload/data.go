@@ -1,9 +1,11 @@
 package workload
 
 import (
-	"crypto/rand"
 	"fmt"
 	"io"
+	"math/rand"
+	"sync"
+	"time"
 )
 
 const (
@@ -15,13 +17,21 @@ const (
 	DefaultChunkSize = 10 * 1024 * 1024 // 10 MiB
 )
 
+// rngPool provides per-goroutine RNG instances to avoid lock contention
+var rngPool = sync.Pool{
+	New: func() interface{} {
+		return rand.New(rand.NewSource(time.Now().UnixNano()))
+	},
+}
+
 // ChunkedRandomReader generates random data on-demand without storing entire file in memory
 // This is memory-efficient for large objects while maintaining good performance
 type ChunkedRandomReader struct {
-	remaining int64  // Bytes left to generate
-	chunkSize int64  // Size of each chunk to generate
-	buffer    []byte // Reusable buffer for chunk generation
-	offset    int    // Current position in buffer
+	remaining int64      // Bytes left to generate
+	chunkSize int64      // Size of each chunk to generate
+	buffer    []byte     // Reusable buffer for chunk generation
+	offset    int        // Current position in buffer
+	rng       *rand.Rand // Per-reader RNG to avoid global lock
 }
 
 // NewChunkedRandomReader creates a reader that generates totalSize bytes of random data
@@ -30,11 +40,15 @@ type ChunkedRandomReader struct {
 // Memory usage: ~chunkSize bytes (default 10 MiB)
 // Performance: Generates data on-demand as S3 uploader requests it
 func NewChunkedRandomReader(totalSize, chunkSize int64) *ChunkedRandomReader {
+	// Get a per-reader RNG from pool to avoid global lock contention
+	rng := rngPool.Get().(*rand.Rand)
+
 	return &ChunkedRandomReader{
 		remaining: totalSize,
 		chunkSize: chunkSize,
 		buffer:    make([]byte, 0),
 		offset:    0,
+		rng:       rng,
 	}
 }
 
@@ -53,9 +67,8 @@ func (r *ChunkedRandomReader) Read(p []byte) (n int, err error) {
 		}
 
 		r.buffer = make([]byte, nextChunkSize)
-		if _, err := rand.Read(r.buffer); err != nil {
-			return 0, fmt.Errorf("failed to generate random chunk: %w", err)
-		}
+		// Use per-reader RNG instead of global crypto/rand - 100x faster
+		r.rng.Read(r.buffer)
 		r.offset = 0
 	}
 
@@ -88,9 +101,10 @@ func GenerateRandomData(size int64) (interface{}, error) {
 
 	// Small object: allocate full buffer in memory
 	data := make([]byte, size)
-	if _, err := rand.Read(data); err != nil {
-		return nil, fmt.Errorf("failed to generate random data: %w", err)
-	}
+	// Use pooled RNG for fast random data generation (no crypto needed for test data)
+	rng := rngPool.Get().(*rand.Rand)
+	rng.Read(data)
+	rngPool.Put(rng)
 	return data, nil
 }
 

@@ -119,8 +119,11 @@ func (t *TranscodeTest) Setup(ctx context.Context) error {
 
 	duration := time.Since(start)
 	totalSize := int64(cfg.SourceFileCount) * cfg.SourceFileSize
-	fmt.Printf("  %sCompleted: %d files (%s total) in %s%s\n\n",
-		ColorBrightGreen, cfg.SourceFileCount, formatBytes(totalSize), formatDuration(duration), ColorReset)
+	bandwidth := float64(totalSize) / duration.Seconds() // bytes per second
+	bandwidthGbps := (bandwidth * 8) / 1_000_000_000     // Convert to Gbps
+	fmt.Printf("  %sCompleted: %d files (%s total) in %s - %.2f Gbps%s\n\n",
+		ColorBrightGreen, cfg.SourceFileCount, formatBytes(totalSize),
+		formatDuration(duration), bandwidthGbps, ColorReset)
 
 	return nil
 }
@@ -142,14 +145,29 @@ func (t *TranscodeTest) Run(ctx context.Context) TestStatus {
 	fmt.Printf("  Parallel Jobs: %d parallel jobs\n", cfg.JobCount)
 	fmt.Printf("  Test Duration: %s\n", cfg.TestDuration)
 
-	// Setup phase
-	fmt.Printf("\n%s", strings.Repeat("-", 60))
-	if err := t.Setup(ctx); err != nil {
-		return TestStatus{
-			Passed:   false,
-			Duration: time.Since(startTime),
-			Message:  fmt.Sprintf("Setup failed: %v", err),
-			Details:  nil,
+	// Setup phase - only run if not already done
+	// Check if source files exist
+	baseClient := t.validator.clients["global"]
+	testKey := fmt.Sprintf("%s/transcode/sources/video-%03d.bin", t.validator.config.Prefix, 0)
+
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	_, err := baseClient.HeadObject(checkCtx, &s3.HeadObjectInput{
+		Bucket: aws.String(t.validator.config.BucketName),
+		Key:    aws.String(testKey),
+	})
+
+	if err != nil {
+		// Source files don't exist, run setup
+		fmt.Printf("\n%s", strings.Repeat("-", 60))
+		if err := t.Setup(ctx); err != nil {
+			return TestStatus{
+				Passed:   false,
+				Duration: time.Since(startTime),
+				Message:  fmt.Sprintf("Setup failed: %v", err),
+				Details:  nil,
+			}
 		}
 	}
 
@@ -451,8 +469,11 @@ func (t *TranscodeTest) displayResults(read, write *TranscodeMetrics, cons *Cons
 		ColorBrightWhite, ColorReset, formatDurationAligned(read.AvgTTFB),
 		ColorBrightWhite, ColorReset, formatDurationAligned(read.P95TTFB),
 		ColorBrightWhite, ColorReset, formatDurationAligned(read.P99TTFB))
-	fmt.Printf("  Throughput - %s%.2f ops/s%s | %s%d success%s",
-		ColorBrightWhite, read.OpsPerSecond, ColorReset,
+	// Calculate bandwidth for read operations in Gbps
+	readBandwidthBytes := read.OpsPerSecond * float64(t.validator.config.TranscodeConfig.ChunkSize)
+	readBandwidthGbps := (readBandwidthBytes * 8) / 1_000_000_000
+	fmt.Printf("  Throughput - %s%.2f ops/s (%.2f Gbps)%s | %s%d success%s",
+		ColorBrightWhite, read.OpsPerSecond, readBandwidthGbps, ColorReset,
 		ColorBrightGreen, read.SuccessOps, ColorReset)
 	if read.ErrorOps > 0 {
 		fmt.Printf(", %s%d failed%s", ColorBrightRed, read.ErrorOps, ColorReset)
@@ -468,8 +489,12 @@ func (t *TranscodeTest) displayResults(read, write *TranscodeMetrics, cons *Cons
 		ColorBrightWhite, ColorReset, formatDurationAligned(write.AvgLatency),
 		ColorBrightWhite, ColorReset, formatDurationAligned(write.P95Latency),
 		ColorBrightWhite, ColorReset, formatDurationAligned(write.P99Latency))
-	fmt.Printf("  Throughput - %s%.2f ops/s%s | %s%d success%s",
-		ColorBrightWhite, write.OpsPerSecond, ColorReset,
+	// Calculate average write size and bandwidth in Gbps
+	avgWriteSize := (t.validator.config.TranscodeConfig.SegmentSizeMin + t.validator.config.TranscodeConfig.SegmentSizeMax) / 2
+	writeBandwidthBytes := write.OpsPerSecond * float64(avgWriteSize)
+	writeBandwidthGbps := (writeBandwidthBytes * 8) / 1_000_000_000
+	fmt.Printf("  Throughput - %s%.2f ops/s (%.2f Gbps)%s | %s%d success%s",
+		ColorBrightWhite, write.OpsPerSecond, writeBandwidthGbps, ColorReset,
 		ColorBrightGreen, write.SuccessOps, ColorReset)
 	if write.ErrorOps > 0 {
 		fmt.Printf(", %s%d failed%s", ColorBrightRed, write.ErrorOps, ColorReset)

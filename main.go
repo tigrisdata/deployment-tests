@@ -8,18 +8,16 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go/logging"
-	"github.com/tigrisdata/deployment-test/workload"
 )
 
-// ANSI color codes
 const (
+	// ANSI color codes
 	ColorReset       = "\033[0m"
 	ColorRed         = "\033[31m"
 	ColorGreen       = "\033[32m"
@@ -32,6 +30,15 @@ const (
 	ColorBrightWhite = "\033[1;37m"
 	ColorBrightGreen = "\033[1;32m"
 	ColorBrightRed   = "\033[1;31m"
+
+	// Defaults
+	DefaultConcurrency         = 20
+	DefaultPrefix              = "t3-validator"
+	DefaultGlobalEndpoint      = "https://oracle.storage.dev"
+	DefaultRegionalEndpointIAD = "https://iad.storage.dev"
+	DefaultRegionalEndpointORD = "https://ord.storage.dev"
+	DefaultRegionalEndpointSJC = "https://sjc.storage.dev"
+	DefaultTests               = "all"
 )
 
 // Custom logger that suppresses AWS SDK warnings
@@ -94,50 +101,9 @@ func formatDurationAligned(d time.Duration) string {
 	return formatted
 }
 
-// TestResult holds individual test results
-type TestResult struct {
-	Operation  string
-	ObjectSize int64
-	Endpoint   string
-	Duration   time.Duration
-	TTFB       time.Duration // Time to first byte (for GET operations)
-	Success    bool
-	Error      error
-	Throughput float64 // bytes per second
-}
-
-// BenchmarkResult holds aggregated benchmark results
-type BenchmarkResult struct {
-	TestType     string
-	Operation    string
-	ObjectSize   int64
-	Endpoint     string
-	Concurrency  int
-	TotalOps     int64
-	SuccessOps   int64
-	ErrorOps     int64
-	MinLatency   time.Duration
-	MaxLatency   time.Duration
-	AvgLatency   time.Duration
-	P50Latency   time.Duration
-	P95Latency   time.Duration
-	P99Latency   time.Duration
-	MinTTFB      time.Duration // Min Time to first byte
-	MaxTTFB      time.Duration // Max Time to first byte
-	AvgTTFB      time.Duration // Avg Time to first byte
-	P50TTFB      time.Duration // P50 Time to first byte
-	P95TTFB      time.Duration // P95 Time to first byte
-	P99TTFB      time.Duration // P99 Time to first byte
-	TotalBytes   int64
-	Throughput   float64 // bytes per second
-	OpsPerSecond float64
-}
-
 // TigrisValidator handles Tigris performance testing
 type TigrisValidator struct {
 	config  TestConfig
-	results []TestResult
-	mu      sync.RWMutex
 	clients map[string]*s3.Client
 }
 
@@ -189,205 +155,8 @@ func NewTigrisValidator(cfg TestConfig) (*TigrisValidator, error) {
 
 	return &TigrisValidator{
 		config:  cfg,
-		results: make([]TestResult, 0),
 		clients: clients,
 	}, nil
-}
-
-// testS3Connectivity tests S3 connectivity to an endpoint
-func (t *TigrisValidator) testS3Connectivity(endpoint string) (time.Duration, error) {
-	client, exists := t.clients[endpoint]
-	if !exists {
-		return 0, fmt.Errorf("no client for endpoint: %s", endpoint)
-	}
-
-	start := time.Now()
-	_, err := client.HeadBucket(context.TODO(), &s3.HeadBucketInput{
-		Bucket: aws.String(t.config.BucketName),
-	})
-	duration := time.Since(start)
-
-	return duration, err
-}
-
-// runConnectivityTests runs connectivity tests
-func (t *TigrisValidator) runConnectivityTests() bool {
-	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
-	fmt.Println(" CONNECTIVITY TESTS")
-	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
-
-	allPassed := true
-
-	// Test global endpoint
-	if t.config.GlobalEndpoint != "" {
-		fmt.Printf("\n%sTesting Global Endpoint: %s%s%s\n", ColorBrightWhite, ColorYellow, t.config.GlobalEndpoint, ColorReset)
-
-		// S3 connectivity test
-		s3Duration, err := t.testS3Connectivity("global")
-		if err != nil {
-			fmt.Printf("  S3 Connectivity: %sFAILED%s - %v\n", ColorBrightRed, ColorReset, err)
-			allPassed = false
-		} else {
-			fmt.Printf("  S3 Connectivity: %sSUCCESS%s - %s\n", ColorBrightGreen, ColorReset, formatDuration(s3Duration))
-		}
-	}
-
-	// Test Regional endpoints
-	for _, endpoint := range t.config.RegionalEndpoints {
-		fmt.Printf("\n%sTesting Regional Endpoint: %s%s%s\n", ColorBrightWhite, ColorYellow, endpoint, ColorReset)
-
-		// S3 connectivity test
-		s3Duration, err := t.testS3Connectivity(endpoint)
-		if err != nil {
-			fmt.Printf("  S3 Connectivity: %sFAILED%s - %v\n", ColorBrightRed, ColorReset, err)
-			allPassed = false
-		} else {
-			fmt.Printf("  S3 Connectivity: %sSUCCESS%s - %s\n", ColorBrightGreen, ColorReset, formatDuration(s3Duration))
-		}
-	}
-
-	return allPassed
-}
-
-// runPerformanceBenchmark runs a single benchmark that collects both latency and throughput metrics
-func (t *TigrisValidator) runPerformanceBenchmark(operation string, size BenchmarkSize, endpoint string) workload.BenchmarkResult {
-	// Determine operation type
-	var opType workload.OpType
-	if operation == "PUT" {
-		opType = workload.OpPUT
-	} else {
-		opType = workload.OpGET
-	}
-
-	// Create workload configuration (YCSB-style)
-	config := workload.WorkloadConfig{
-		Bucket:          t.config.BucketName,
-		Endpoint:        endpoint,
-		Prefix:          fmt.Sprintf("%s/%s-%d", t.config.Prefix, operation, size.ObjectSize),
-		ObjectSize:      size.ObjectSize,
-		RecordCount:     size.RecordCount, // Number of records to preload
-		OperationCount:  size.OpCount,     // Number of operations to run
-		TestDuration:    0,                // Not used, using operation count only
-		Concurrency:     t.config.Concurrency,
-		OperationType:   opType,
-		Seed:            time.Now().UnixNano(),
-		KeyDistribution: workload.DistUniform,
-		ReuseObjects:    false,
-		UseMultipart:    size.UseMultipart,  // Enable multipart for large objects
-		MultipartSize:   size.MultipartSize, // Part size for multipart uploads
-	}
-
-	// Get S3 client for endpoint
-	client := t.clients[endpoint]
-
-	// Create workload generator
-	gen, err := workload.NewGenerator(config, client)
-	if err != nil {
-		// Handle error
-		return workload.BenchmarkResult{}
-	}
-
-	// Run benchmark (includes preload for GET)
-	result, err := gen.RunBenchmark(context.Background())
-	if err != nil {
-		// Handle error
-		return workload.BenchmarkResult{}
-	}
-
-	return *result
-}
-
-// runPerformanceBenchmarks runs all performance benchmarks (latency and throughput)
-func (t *TigrisValidator) runPerformanceBenchmarks() bool {
-	fmt.Printf("\n%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
-	fmt.Println(" PERFORMANCE TESTS")
-	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
-
-	// Test global endpoint
-	endpoints := []string{"global"}
-
-	for _, endpoint := range endpoints {
-		if endpoint == "global" && t.config.GlobalEndpoint == "" {
-			continue
-		}
-
-		fmt.Printf("\n%sTesting Endpoint: %s%s%s\n", ColorBrightWhite, ColorYellow, endpoint, ColorReset)
-		fmt.Println(strings.Repeat("-", 60))
-
-		// PUT performance tests
-		fmt.Println("PUT Performance Tests:")
-		for _, size := range t.config.BenchmarkSizes {
-			multipartInfo := ""
-			if size.UseMultipart {
-				multipartInfo = fmt.Sprintf(", multipart: %d MiB parts", size.MultipartSize/(1024*1024))
-			}
-			fmt.Printf("  Testing %s (%d records, %d ops%s)...\n", size.DisplayName, size.RecordCount, size.OpCount, multipartInfo)
-			result := t.runPerformanceBenchmark("PUT", size, endpoint)
-
-			// Display latency metrics
-			fmt.Printf("    Latency    - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
-				ColorBrightWhite, ColorReset, formatDurationAligned(result.AvgLatency),
-				ColorBrightWhite, ColorReset, formatDurationAligned(result.P95Latency),
-				ColorBrightWhite, ColorReset, formatDurationAligned(result.P99Latency))
-
-			// Display throughput metrics
-			if result.SuccessOps > 0 {
-				if result.ErrorOps > 0 {
-					fmt.Printf("    Throughput - %s%8.3f MB/s%s | %s%8.3f ops/s%s | %s%d success, %d failed%s\n",
-						ColorBrightWhite, result.ThroughputMBps, ColorReset,
-						ColorBrightWhite, result.OpsPerSecond, ColorReset,
-						ColorBrightGreen, result.SuccessOps, result.ErrorOps, ColorReset)
-				} else {
-					fmt.Printf("    Throughput - %s%8.3f MB/s%s | %s%8.3f ops/s%s | %s%d success%s\n",
-						ColorBrightWhite, result.ThroughputMBps, ColorReset,
-						ColorBrightWhite, result.OpsPerSecond, ColorReset,
-						ColorBrightGreen, result.SuccessOps, ColorReset)
-				}
-			} else {
-				fmt.Printf("    %sFAILED%s (no successful operations)\n", ColorBrightRed, ColorReset)
-			}
-		}
-
-		// GET performance tests (reuse objects created by PUT tests)
-		fmt.Println("\nGET Performance Tests:")
-		for _, size := range t.config.BenchmarkSizes {
-			fmt.Printf("  Testing %s (%d records, %d ops)...\n", size.DisplayName, size.RecordCount, size.OpCount)
-			result := t.runPerformanceBenchmark("GET", size, endpoint)
-
-			// Display latency metrics
-			fmt.Printf("    Latency    - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
-				ColorBrightWhite, ColorReset, formatDurationAligned(result.AvgLatency),
-				ColorBrightWhite, ColorReset, formatDurationAligned(result.P95Latency),
-				ColorBrightWhite, ColorReset, formatDurationAligned(result.P99Latency))
-
-			// Display TTFB metrics (only for GET operations)
-			fmt.Printf("    TTFB       - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
-				ColorBrightWhite, ColorReset, formatDurationAligned(result.AvgTTFB),
-				ColorBrightWhite, ColorReset, formatDurationAligned(result.P95TTFB),
-				ColorBrightWhite, ColorReset, formatDurationAligned(result.P99TTFB))
-
-			// Display throughput metrics
-			if result.SuccessOps > 0 {
-				if result.ErrorOps > 0 {
-					fmt.Printf("    Throughput - %s%8.3f MB/s%s | %s%8.3f ops/s%s | %s%d success, %d failed%s\n",
-						ColorBrightWhite, result.ThroughputMBps, ColorReset,
-						ColorBrightWhite, result.OpsPerSecond, ColorReset,
-						ColorBrightGreen, result.SuccessOps, result.ErrorOps, ColorReset)
-				} else {
-					fmt.Printf("    Throughput - %s%8.3f MB/s%s | %s%8.3f ops/s%s | %s%d success%s\n",
-						ColorBrightWhite, result.ThroughputMBps, ColorReset,
-						ColorBrightWhite, result.OpsPerSecond, ColorReset,
-						ColorBrightGreen, result.SuccessOps, ColorReset)
-				}
-			} else {
-				fmt.Printf("    %sFAILED%s (no successful operations)\n", ColorBrightRed, ColorReset)
-			}
-		}
-	}
-
-	// For now, assume all performance benchmarks pass
-	// TODO: Implement detailed failure tracking
-	return true
 }
 
 // RunAllTests runs the complete test suite
@@ -407,71 +176,66 @@ func (t *TigrisValidator) RunAllTests() error {
 	fmt.Printf("Regional Endpoints: %s%v%s\n", ColorBrightWhite, t.config.RegionalEndpoints, ColorReset)
 	fmt.Printf("\n")
 
-	// Track test results
-	testResults := struct {
-		consistencyPassed  bool
-		connectivityPassed bool
-		performancePassed  bool
-		ranTests           bool
-	}{
-		consistencyPassed:  true,
-		connectivityPassed: true,
-		performancePassed:  true,
-		ranTests:           false,
-	}
+	// Create test instances
+	var tests []Test
 
-	// Run connectivity tests
 	if t.config.RunConnectivity {
-		testResults.connectivityPassed = t.runConnectivityTests()
-		testResults.ranTests = true
+		tests = append(tests, NewConnectivityTest(t))
 	}
 
-	// Run consistency tests first
 	if t.config.RunConsistency {
-		testResults.consistencyPassed = RunConsistencyTests(t)
-		testResults.ranTests = true
+		tests = append(tests, NewConsistencyTest(t))
 	}
 
-	// Run performance benchmarks
 	if t.config.RunPerformance {
-		testResults.performancePassed = t.runPerformanceBenchmarks()
-		testResults.ranTests = true
+		tests = append(tests, NewPerformanceTest(t))
 	}
 
-	// Display test summary if any tests were run
-	if testResults.ranTests {
-		fmt.Printf("\n%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
-		fmt.Println(" TEST SUMMARY")
-		fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
-
-		// Display results for each test section that was run
-		if t.config.RunConnectivity {
-			if testResults.connectivityPassed {
-				fmt.Printf(" CONNECTIVITY TESTS %sPASSED%s\n", ColorBrightGreen, ColorReset)
-			} else {
-				fmt.Printf(" CONNECTIVITY TESTS %sFAILED%s\n", ColorBrightRed, ColorReset)
-			}
-		}
-
-		if t.config.RunConsistency {
-			if testResults.consistencyPassed {
-				fmt.Printf(" CONSISTENCY TESTS %sPASSED%s\n", ColorBrightGreen, ColorReset)
-			} else {
-				fmt.Printf(" CONSISTENCY TESTS %sFAILED%s\n", ColorBrightRed, ColorReset)
-			}
-		}
-
-		if t.config.RunPerformance {
-			if testResults.performancePassed {
-				fmt.Printf(" PERFORMANCE BENCHMARKS %sPASSED%s\n", ColorBrightGreen, ColorReset)
-			} else {
-				fmt.Printf(" PERFORMANCE BENCHMARKS %sFAILED%s\n", ColorBrightRed, ColorReset)
-			}
-		}
-	} else {
+	// Check if any tests are configured to run
+	if len(tests) == 0 {
 		fmt.Printf("\n%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
 		fmt.Printf(" %sNO TESTS RUN%s - All test flags were set to false\n", ColorBrightRed, ColorReset)
 		fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
+		return nil
+	}
+
+	// Run tests
+	ctx := context.Background()
+	results := make(map[string]TestStatus)
+
+	for _, test := range tests {
+		// Setup
+		if err := test.Setup(ctx); err != nil {
+			log.Printf("Failed to setup %s: %v", test.Name(), err)
+			continue
+		}
+
+		// Run test
+		result := test.Run(ctx)
+		results[string(test.Type())] = result
+
+		// Cleanup
+		if err := test.Cleanup(ctx); err != nil {
+			log.Printf("Failed to cleanup %s: %v", test.Name(), err)
+		}
+	}
+
+	// Display test summary
+	fmt.Printf("\n%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
+	fmt.Println(" TEST SUMMARY")
+	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
+
+	for testType, result := range results {
+		testName := strings.ToUpper(testType) + " TESTS"
+		if testType == string(TestTypePerformance) {
+			testName = "PERFORMANCE BENCHMARKS"
+		}
+
+		if result.Passed {
+			fmt.Printf(" %s %sPASSED%s\n", testName, ColorBrightGreen, ColorReset)
+		} else {
+			fmt.Printf(" %s %sFAILED%s\n", testName, ColorBrightRed, ColorReset)
+		}
 	}
 
 	fmt.Printf("\n%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
@@ -485,13 +249,11 @@ func main() {
 	// Parse command line flags
 	var (
 		bucketName        = flag.String("bucket", "", "Bucket name (required)")
-		concurrency       = flag.Int("concurrency", 20, "Number of concurrent operations")
-		prefix            = flag.String("prefix", "t3-validator", "Object key prefix")
-		globalEndpoint    = flag.String("global-endpoint", "https://t3.storage.dev", "Global Tigris endpoint URL")
-		regionalEndpoints = flag.String("regional-endpoints", "https://iad1.storage.dev,https://ord1.storage.dev,https://sjc.storage.dev", "Comma-separated list of regional Tigris endpoints")
-
-		// Test selection flag
-		tests = flag.String("tests", "all", "Comma-separated list of tests to run: connectivity,consistency,performance (default: all)")
+		concurrency       = flag.Int("concurrency", DefaultConcurrency, "Number of concurrent operations")
+		prefix            = flag.String("prefix", DefaultPrefix, "Object key prefix")
+		globalEndpoint    = flag.String("global-endpoint", DefaultGlobalEndpoint, "Global Tigris endpoint URL")
+		regionalEndpoints = flag.String("regional-endpoints", strings.Join([]string{DefaultRegionalEndpointIAD, DefaultRegionalEndpointORD, DefaultRegionalEndpointSJC}, ","), "Comma-separated list of regional Tigris endpoints")
+		tests             = flag.String("tests", DefaultTests, "Comma-separated list of tests to run: connectivity,consistency,performance (default: all)")
 	)
 	flag.Parse()
 

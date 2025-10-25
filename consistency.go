@@ -13,7 +13,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/smithy-go/transport/http"
 	"github.com/google/uuid"
 )
 
@@ -35,6 +34,127 @@ type ConvergenceStats struct {
 	EventualCount    int
 	TimeoutCount     int
 	ConvergenceTimes []time.Duration // For percentile calculation
+}
+
+// ConsistencyTest implements the Test interface for consistency testing
+type ConsistencyTest struct {
+	validator *TigrisValidator
+}
+
+// NewConsistencyTest creates a new consistency test
+func NewConsistencyTest(validator *TigrisValidator) *ConsistencyTest {
+	return &ConsistencyTest{
+		validator: validator,
+	}
+}
+
+// Name returns the display name of the test
+func (t *ConsistencyTest) Name() string {
+	return "Consistency Tests"
+}
+
+// Type returns the type of test
+func (t *ConsistencyTest) Type() TestType {
+	return TestTypeConsistency
+}
+
+// Setup performs any necessary setup before running the test
+func (t *ConsistencyTest) Setup(ctx context.Context) error {
+	return nil
+}
+
+// Cleanup performs any necessary cleanup after running the test
+func (t *ConsistencyTest) Cleanup(ctx context.Context) error {
+	return nil
+}
+
+// Run executes the consistency test
+func (t *ConsistencyTest) Run(ctx context.Context) TestStatus {
+	startTime := time.Now()
+
+	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
+	fmt.Printf(" %sCONSISTENCY TESTS%s\n", ColorBrightWhite, ColorReset)
+	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
+
+	allPassed := true
+	details := make(map[string]interface{})
+
+	// Test global endpoint if available
+	if t.validator.config.GlobalEndpoint != "" {
+		fmt.Printf("\n%sTesting Global Endpoint: %s%s%s\n", ColorBrightWhite, ColorYellow, t.validator.config.GlobalEndpoint, ColorReset)
+		if !t.runConsistencyTestsForEndpoint("global", t.validator.config.GlobalEndpoint) {
+			allPassed = false
+			details["global"] = false
+		} else {
+			details["global"] = true
+		}
+	}
+
+	// Test Regional endpoints
+	for _, endpoint := range t.validator.config.RegionalEndpoints {
+		fmt.Printf("\n%sTesting Regional Endpoint: %s%s%s\n", ColorBrightWhite, ColorYellow, endpoint, ColorReset)
+		if !t.runConsistencyTestsForEndpoint(endpoint, endpoint) {
+			allPassed = false
+			details[endpoint] = false
+		} else {
+			details[endpoint] = true
+		}
+	}
+
+	duration := time.Since(startTime)
+	message := "All consistency tests passed"
+	if !allPassed {
+		message = "Some consistency tests failed"
+	}
+
+	return TestStatus{
+		Passed:   allPassed,
+		Duration: duration,
+		Message:  message,
+		Details:  details,
+	}
+}
+
+// runConsistencyTestsForEndpoint runs consistency tests for a specific endpoint
+func (t *ConsistencyTest) runConsistencyTestsForEndpoint(endpointName, endpointURL string) bool {
+	client, exists := t.validator.clients[endpointName]
+	if !exists {
+		fmt.Printf("  %sNo client available for endpoint%s\n", ColorBrightRed, ColorReset)
+		return false
+	}
+
+	// Create a map of region to clients for the existing functions
+	regionToClients := make(map[string]*s3.Client)
+	regionToClients[endpointURL] = client
+
+	// Add other regional clients if available
+	for _, ep := range t.validator.config.RegionalEndpoints {
+		if ep != endpointName {
+			if regionalClient, exists := t.validator.clients[ep]; exists {
+				regionToClients[ep] = regionalClient
+			}
+		}
+	}
+
+	// Build regions array with endpointURL as the first element (source region)
+	regions := make([]string, 0, len(regionToClients))
+	regions = append(regions, endpointURL) // Source region first
+	for region := range regionToClients {
+		if region != endpointURL {
+			regions = append(regions, region)
+		}
+	}
+
+	// Track if any test fails
+	allPassed := true
+
+	// Generate unique run ID for this test run to ensure isolation
+	runID := uuid.New().String()
+
+	applyRemoteRegionsChecks(regionToClients, regions, t.validator.config.BucketName, t.validator.config.Prefix, runID)
+	applyListConsistencyChecks(regionToClients, regions, t.validator.config.BucketName, t.validator.config.Prefix, runID)
+
+	return allPassed
 }
 
 // calculateStats computes statistics from collected metrics
@@ -110,12 +230,6 @@ func getRegionDisplayName(region string) string {
 	}
 
 	return region
-}
-
-func WithHeader(key, value string) func(*s3.Options) {
-	return func(options *s3.Options) {
-		options.APIOptions = append(options.APIOptions, http.AddHeaderValue(key, value))
-	}
 }
 
 func applyRemoteRegionsChecks(regionToClients map[string]*s3.Client, regions []string, bucket string, basePrefix string, runID string) {
@@ -386,7 +500,6 @@ func put(cl *s3.Client, buc string, key string) string {
 			Key:    aws.String(key),
 			Body:   bytes.NewReader(kb64),
 		},
-		WithHeader("Cache-Control", "no-cache"),
 	)
 	if err != nil {
 		log.Printf("unexpected put failed '%v'", err)
@@ -403,7 +516,6 @@ func getEtagWithError(cl *s3.Client, buc string, key string) (string, error) {
 			Bucket: aws.String(buc),
 			Key:    aws.String(key),
 		},
-		WithHeader("Cache-Control", "no-cache"),
 	)
 	if err != nil {
 		return "", err
@@ -430,7 +542,6 @@ func putResults(cl *s3.Client, buc string, keys []string) (map[string]string, er
 				Key:    aws.String(key),
 				Body:   bytes.NewReader(kb64),
 			},
-			WithHeader("Cache-Control", "no-cache"),
 		)
 		if err != nil {
 			return nil, err
@@ -459,151 +570,4 @@ func listResults(cl *s3.Client, buc string, prefix string, limit int) (map[strin
 	}
 
 	return keyToETag, nil
-}
-
-// Logger represents a consistency test logger
-type Logger struct {
-	testName string
-	opts     Opts
-}
-
-// Opts represents options for consistency tests
-type Opts struct {
-	ID     string
-	Region []string
-}
-
-// Start creates a new consistency log
-func Start(testName string, opts Opts) *Logger {
-	fmt.Printf("\n%s%s%s\n", ColorBrightWhite, testName, ColorReset)
-	return &Logger{
-		testName: testName,
-		opts:     opts,
-	}
-}
-
-// Successf logs a success message
-func (c *Logger) Successf(duration time.Duration, format string, args ...interface{}) {
-	fmt.Printf("  %sSUCCESS%s - %s (%s%s%s)\n\n",
-		ColorBrightGreen, ColorReset,
-		fmt.Sprintf(format, args...),
-		ColorBrightWhite, formatDuration(duration), ColorReset)
-}
-
-// Failf logs a failure message
-func (c *Logger) Failf(format string, args ...interface{}) {
-	fmt.Printf("  %sFAILED%s - %s\n",
-		ColorBrightRed, ColorReset,
-		fmt.Sprintf(format, args...))
-}
-
-// Infof logs an info message
-func (c *Logger) Infof(format string, args ...interface{}) {
-	fmt.Printf("  INFO - %s\n",
-		fmt.Sprintf(format, args...))
-}
-
-// SuccessAfterf logs a success message after attempts
-func (c *Logger) SuccessAfterf(attempts int, duration time.Duration, format string, args ...interface{}) {
-	fmt.Printf("  %sSUCCESS%s - %s (attempts: %s%d%s, %s%s%s)\n\n",
-		ColorBrightGreen, ColorReset,
-		fmt.Sprintf(format, args...),
-		ColorBrightWhite, attempts, ColorReset,
-		ColorBrightWhite, formatDuration(duration), ColorReset)
-}
-
-// StatsSummaryf logs aggregated statistics
-func (c *Logger) StatsSummaryf(sourceRegion, targetRegion string, stats ConvergenceStats) {
-	immediatePercent := 0.0
-	eventualPercent := 0.0
-	timeoutPercent := 0.0
-
-	if stats.Iterations > 0 {
-		immediatePercent = float64(stats.ImmediateCount) * 100.0 / float64(stats.Iterations)
-		eventualPercent = float64(stats.EventualCount) * 100.0 / float64(stats.Iterations)
-		timeoutPercent = float64(stats.TimeoutCount) * 100.0 / float64(stats.Iterations)
-	}
-
-	fmt.Printf("  %s%s -> %s%s (%d iterations)\n",
-		ColorYellow, getRegionDisplayName(sourceRegion), getRegionDisplayName(targetRegion), ColorReset,
-		stats.Iterations)
-
-	if stats.ImmediateCount+stats.EventualCount > 0 {
-		fmt.Printf("    Convergence - Avg: %s%8s%s, P95: %s%8s%s, P99: %s%8s%s\n",
-			ColorBrightWhite, formatDuration(stats.AvgTime), ColorReset,
-			ColorBrightWhite, formatDuration(stats.P95Time), ColorReset,
-			ColorBrightWhite, formatDuration(stats.P99Time), ColorReset)
-	}
-
-	fmt.Printf("    Distribution - Immediate: %5.1f%%, Eventual: %5.1f%%, Timeout: %5.1f%%\n",
-		immediatePercent, eventualPercent, timeoutPercent)
-}
-
-// RunConsistencyTests runs the existing consistency tests
-func RunConsistencyTests(t *TigrisValidator) bool {
-	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
-	fmt.Printf(" %sCONSISTENCY TESTS%s\n", ColorBrightWhite, ColorReset)
-	fmt.Printf("%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
-
-	allPassed := true
-
-	// Test global endpoint if available
-	if t.config.GlobalEndpoint != "" {
-		fmt.Printf("\n%sTesting Global Endpoint: %s%s%s\n", ColorBrightWhite, ColorYellow, t.config.GlobalEndpoint, ColorReset)
-		if !runConsistencyTestsForEndpoint(t, "global", t.config.GlobalEndpoint) {
-			allPassed = false
-		}
-	}
-
-	// Test Regional endpoints
-	for _, endpoint := range t.config.RegionalEndpoints {
-		fmt.Printf("\n%sTesting Regional Endpoint: %s%s%s\n", ColorBrightWhite, ColorYellow, endpoint, ColorReset)
-		if !runConsistencyTestsForEndpoint(t, endpoint, endpoint) {
-			allPassed = false
-		}
-	}
-
-	return allPassed
-}
-
-// runConsistencyTestsForEndpoint runs consistency tests for a specific endpoint
-func runConsistencyTestsForEndpoint(t *TigrisValidator, endpointName, endpointURL string) bool {
-	client, exists := t.clients[endpointName]
-	if !exists {
-		fmt.Printf("  %sNo client available for endpoint%s\n", ColorBrightRed, ColorReset)
-		return false
-	}
-
-	// Create a map of region to clients for the existing functions
-	regionToClients := make(map[string]*s3.Client)
-	regionToClients[endpointURL] = client
-
-	// Add other regional clients if available
-	for _, ep := range t.config.RegionalEndpoints {
-		if ep != endpointName {
-			if regionalClient, exists := t.clients[ep]; exists {
-				regionToClients[ep] = regionalClient
-			}
-		}
-	}
-
-	// Build regions array with endpointURL as the first element (source region)
-	regions := make([]string, 0, len(regionToClients))
-	regions = append(regions, endpointURL) // Source region first
-	for region := range regionToClients {
-		if region != endpointURL {
-			regions = append(regions, region)
-		}
-	}
-
-	// Track if any test fails
-	allPassed := true
-
-	// Generate unique run ID for this test run to ensure isolation
-	runID := uuid.New().String()
-
-	applyRemoteRegionsChecks(regionToClients, regions, t.config.BucketName, t.config.Prefix, runID)
-	applyListConsistencyChecks(regionToClients, regions, t.config.BucketName, t.config.Prefix, runID)
-
-	return allPassed
 }

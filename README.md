@@ -75,14 +75,14 @@ The test suite includes four types of tests that can be run independently or tog
 
 ### Command Line Options
 
-| Flag                  | Description                                                                        | Default                                                                   |
-| --------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `-bucket`             | S3 bucket name (required)                                                          | -                                                                         |
-| `-concurrency`        | Number of concurrent operations                                                    | 20                                                                        |
-| `-prefix`             | S3 key prefix                                                                      | perf-test                                                                 |
-| `-global-endpoint`    | Global S3 endpoint URL                                                             | https://t3.storage.dev                                                    |
-| `-regional-endpoints` | Comma-separated regional endpoints                                                 | https://iad1.storage.dev,https://ord1.storage.dev,https://sjc.storage.dev |
-| `-tests`              | Comma-separated list of tests to run: `connectivity`, `consistency`, `performance` | all                                                                       |
+| Flag                  | Description                                                                        | Default                                                                 |
+| --------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `-bucket`             | S3 bucket name (required)                                                          | -                                                                       |
+| `-concurrency`        | Number of concurrent operations                                                    | 20                                                                      |
+| `-prefix`             | S3 key prefix                                                                      | perf-test                                                               |
+| `-global-endpoint`    | Global S3 endpoint URL                                                             | https://oracle.storage.dev                                              |
+| `-regional-endpoints` | Comma-separated regional endpoints                                                 | https://iad.storage.dev,https://ord.storage.dev,https://sjc.storage.dev |
+| `-tests`              | Comma-separated list of tests to run: `connectivity`, `consistency`, `performance` | all                                                                     |
 
 ### Examples
 

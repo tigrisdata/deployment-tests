@@ -12,6 +12,7 @@ const (
 	TestTypeConnectivity TestType = "connectivity"
 	TestTypeConsistency  TestType = "consistency"
 	TestTypePerformance  TestType = "performance"
+	TestTypeTranscode    TestType = "transcode"
 )
 
 // TestStatus represents the result of a test

@@ -163,15 +163,6 @@ func NewTigrisValidator(cfg TestConfig) (*TigrisValidator, error) {
 func (t *TigrisValidator) RunAllTests() error {
 	fmt.Printf("Starting Tigris Performance Test Suite...\n")
 	fmt.Printf("Bucket: %s%s%s\n", ColorBrightWhite, t.config.BucketName, ColorReset)
-	fmt.Printf("Concurrency: %s%d%s\n", ColorBrightWhite, t.config.Concurrency, ColorReset)
-	fmt.Printf("Benchmark Sizes: ")
-	for i, size := range t.config.BenchmarkSizes {
-		if i > 0 {
-			fmt.Printf(", ")
-		}
-		fmt.Printf("%s%s%s", ColorBrightWhite, size.DisplayName, ColorReset)
-	}
-	fmt.Printf("\n")
 	fmt.Printf("Global Endpoint: %s%s%s\n", ColorBrightWhite, t.config.GlobalEndpoint, ColorReset)
 	fmt.Printf("Regional Endpoints: %s%v%s\n", ColorBrightWhite, t.config.RegionalEndpoints, ColorReset)
 	fmt.Printf("\n")
@@ -189,6 +180,10 @@ func (t *TigrisValidator) RunAllTests() error {
 
 	if t.config.RunPerformance {
 		tests = append(tests, NewPerformanceTest(t))
+	}
+
+	if t.config.RunTranscode {
+		tests = append(tests, NewTranscodeTest(t))
 	}
 
 	// Check if any tests are configured to run
@@ -229,6 +224,8 @@ func (t *TigrisValidator) RunAllTests() error {
 		testName := strings.ToUpper(testType) + " TESTS"
 		if testType == string(TestTypePerformance) {
 			testName = "PERFORMANCE BENCHMARKS"
+		} else if testType == string(TestTypeTranscode) {
+			testName = "TRANSCODING WORKLOAD TESTS"
 		}
 
 		if result.Passed {
@@ -253,7 +250,7 @@ func main() {
 		prefix            = flag.String("prefix", DefaultPrefix, "Object key prefix")
 		globalEndpoint    = flag.String("global-endpoint", DefaultGlobalEndpoint, "Global Tigris endpoint URL")
 		regionalEndpoints = flag.String("regional-endpoints", strings.Join([]string{DefaultRegionalEndpointIAD, DefaultRegionalEndpointORD, DefaultRegionalEndpointSJC}, ","), "Comma-separated list of regional Tigris endpoints")
-		tests             = flag.String("tests", DefaultTests, "Comma-separated list of tests to run: connectivity,consistency,performance (default: all)")
+		tests             = flag.String("tests", DefaultTests, "Comma-separated list of tests to run: connectivity,consistency,performance,transcode (default: all)")
 	)
 	flag.Parse()
 
@@ -277,11 +274,13 @@ func main() {
 	runConnectivity := false
 	runConsistency := false
 	runPerformance := false
+	runTranscode := false
 
 	if testList == "all" || testList == "" {
 		runConnectivity = true
 		runConsistency = true
 		runPerformance = true
+		runTranscode = true
 	} else {
 		selectedTests := strings.Split(testList, ",")
 		for _, test := range selectedTests {
@@ -293,8 +292,10 @@ func main() {
 				runConsistency = true
 			case "performance":
 				runPerformance = true
+			case "transcode":
+				runTranscode = true
 			default:
-				fmt.Fprintf(os.Stderr, "Warning: unknown test '%s' ignored. Valid tests: connectivity, consistency, performance\n", test)
+				fmt.Fprintf(os.Stderr, "Warning: unknown test '%s' ignored. Valid tests: connectivity, consistency, performance, transcode\n", test)
 			}
 		}
 	}
@@ -314,6 +315,8 @@ func main() {
 		RunConnectivity:   runConnectivity,
 		RunConsistency:    runConsistency,
 		RunPerformance:    runPerformance,
+		RunTranscode:      runTranscode,
+		TranscodeConfig:   DefaultTranscodeConfig,
 	}
 
 	// Create performance tester

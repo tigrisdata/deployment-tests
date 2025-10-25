@@ -1,5 +1,7 @@
 package main
 
+import "time"
+
 // BenchmarkSize defines a test configuration for a specific object size
 type BenchmarkSize struct {
 	ObjectSize    int64  // Size in bytes
@@ -40,6 +42,29 @@ var DefaultBenchmarkSizes = []BenchmarkSize{
 	},
 }
 
+// TranscodeConfig defines configuration for transcoding workload test
+type TranscodeConfig struct {
+	SourceFileSize  int64         // Size of source video files
+	SourceFileCount int           // Number of source files to preload
+	ChunkSize       int64         // Size of range read chunks (simulating encoder reads)
+	SegmentSizeMin  int64         // Min output segment size
+	SegmentSizeMax  int64         // Max output segment size
+	JobCount        int           // Number of parallel encoding jobs
+	TestDuration    time.Duration // How long to run the test
+}
+
+// DefaultTranscodeConfig defines the default transcoding test configuration
+// Simulates video transcoding workload with large file reads and small file writes
+var DefaultTranscodeConfig = TranscodeConfig{
+	SourceFileSize:  10 * 1024 * 1024 * 1024, // 10 GB per source file
+	SourceFileCount: 10,                      // 10 source files (~100 GB total)
+	ChunkSize:       100 * 1024 * 1024,       // 100 MB chunks (range reads)
+	SegmentSizeMin:  1 * 1024 * 1024,         // 1 MB min segment
+	SegmentSizeMax:  6 * 1024 * 1024,         // 6 MB max segment
+	JobCount:        100,                     // 100 parallel encoding jobs
+	TestDuration:    5 * time.Minute,         // 5 minute test duration
+}
+
 // TestConfig holds configuration for the performance test
 type TestConfig struct {
 	BucketName        string
@@ -51,4 +76,6 @@ type TestConfig struct {
 	RunConnectivity   bool
 	RunConsistency    bool
 	RunPerformance    bool
+	RunTranscode      bool
+	TranscodeConfig   TranscodeConfig // Transcoding test configuration
 }

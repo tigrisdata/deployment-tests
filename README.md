@@ -1,6 +1,6 @@
 # Tigris Validator Test Suite
 
-A comprehensive Go-based performance testing tool for Tigris. This tool implements a complete test suite covering connectivity, latency, and throughput tests across global and regional endpoints.
+A comprehensive Go-based performance testing tool for Tigris. This tool implements a complete test suite covering connectivity, consistency, performance, and specialized workload tests across global and regional endpoints.
 
 ## Test Suite Overview
 
@@ -31,6 +31,22 @@ The test suite includes four types of tests that can be run independently or tog
   - Includes TTFB (Time To First Byte) metrics
   - Collects both latency and throughput metrics in a single test run
 
+### **Transcoding Workload Tests** (simulates video transcoding workloads)
+
+- **Large File Range Reads**: Simulates encoders reading chunks from large source files (90GB+)
+  - Uses HTTP range requests to read 200MB chunks
+  - Measures TTFB and download latency for range requests
+  - Tests parallel access to large files from multiple workers
+- **Small File Burst Writes**: Simulates writing encoded video segments (1-6MB)
+  - High-frequency writes of small output files
+  - Measures write throughput and latency
+- **Read-After-Write Consistency**: Validates immediate consistency with <200ms target
+  - Tests consistency of written segments across global endpoint
+  - Tracks percentage meeting latency target
+  - Reports immediate vs. eventual consistency distribution
+- **Configurable Duration**: Default 5-minute test with 100 parallel jobs
+- **Source Files**: 10 × 90GB source files (configurable in code)
+
 ## Features
 
 - **Configurable Test Selection**: Run specific test suites or all tests together
@@ -40,6 +56,9 @@ The test suite includes four types of tests that can be run independently or tog
 - **Configurable Concurrency**: Adjustable concurrent operations for realistic load testing
 - **Multiple Object Sizes**: Tests with 1 MiB, 10 MiB, and 100 MiB objects
 - **Optimized Performance**: Per-worker S3 clients, buffer pooling, multipart uploads/downloads
+- **Memory-Efficient**: Automatic streaming uploads for large objects (>10MB) to minimize memory usage
+  - Small objects (≤10MB): Fast in-memory generation and upload
+  - Large objects (>10MB): Streaming generation with ~10MB chunks (uses only ~100MB memory vs 90GB for a 90GB file)
 - **Real-time Results**: Live performance metrics during test execution
 - **Professional Reporting**: Detailed test results with statistical analysis
 
@@ -82,7 +101,7 @@ The test suite includes four types of tests that can be run independently or tog
 | `-prefix`             | S3 key prefix                                                                      | perf-test                                                               |
 | `-global-endpoint`    | Global S3 endpoint URL                                                             | https://oracle.storage.dev                                              |
 | `-regional-endpoints` | Comma-separated regional endpoints                                                 | https://iad.storage.dev,https://ord.storage.dev,https://sjc.storage.dev |
-| `-tests`              | Comma-separated list of tests to run: `connectivity`, `consistency`, `performance` | all                                                                     |
+| `-tests`              | Comma-separated list of tests to run: `connectivity`, `consistency`, `performance`, `transcode` | all                                                                     |
 
 ### Examples
 
@@ -129,6 +148,22 @@ The test suite includes four types of tests that can be run independently or tog
   -regional-endpoints https://iad1.storage.dev,https://sjc.storage.dev \
   -tests performance \
   -concurrency 50
+```
+
+**Run transcoding workload test:**
+
+```bash
+./t3-validator -bucket my-bucket \
+  -global-endpoint https://oracle.storage.dev \
+  -tests transcode
+```
+
+**Run multiple test types:**
+
+```bash
+./t3-validator -bucket my-bucket \
+  -global-endpoint https://oracle.storage.dev \
+  -tests consistency,transcode
 ```
 
 ## Test Results
@@ -222,6 +257,47 @@ GET Performance Tests:
     Latency    - Avg:  750.610ms, P95:     1.024s, P99:     1.117s
     TTFB       - Avg:   75.061ms, P95:  102.399ms, P99:  111.651ms
     Throughput - 2035.193 MB/s |   20.352 ops/s | 100 success
+```
+
+### Transcoding Workload Results
+
+```
+================================================================================
+ TRANSCODING WORKLOAD TESTS
+================================================================================
+
+Configuration:
+  Source Files: 10 × 90.0 GiB
+  Chunk Size: 200.0 MiB (range reads)
+  Segment Size: 1.0 MiB - 6.0 MiB
+  Parallel Jobs: 100
+  Duration: 5m0s
+
+------------------------------------------------------------
+Setup Phase: Uploading 10 source files (90 GB each)...
+  Progress: 10/10 files uploaded
+  Completed: 10 files (900.0 GiB total) in 15m23.456s
+
+------------------------------------------------------------
+Transcoding Simulation (100 parallel jobs, 5m0s duration):
+
+Read Operations (Range Requests, 200.0 MiB chunks):
+  Latency    - Avg:  245.123ms, P95:  456.789ms, P99:  892.345ms
+  TTFB       - Avg:   45.678ms, P95:   89.123ms, P99:  156.789ms
+  Throughput - 6.17 ops/s | 45823 success
+
+Write Operations (Output Segments, 1.0 MiB - 6.0 MiB):
+  Latency    - Avg:   87.234ms, P95:  145.678ms, P99:  234.567ms
+  Throughput - 123.45 ops/s | 37046 success
+
+Read-After-Write Consistency:
+  Convergence - Avg:   12.345ms, P95:   78.901ms, P99:  156.789ms
+  Distribution - Immediate (<200ms): 98.5%, Eventual (>200ms):  1.5%, Failed:  0.0%
+  Target (<200ms): 98.5% within target
+
+Cleanup Phase: Removing test objects... DONE
+
+Total Duration: 21m57s
 ```
 
 ## AWS Credentials

@@ -44,6 +44,21 @@ type ConsistencyMetrics struct {
 	Latencies           []time.Duration
 }
 
+// workerTranscodeMetrics holds per-worker metrics to avoid lock contention
+type workerTranscodeMetrics struct {
+	readLatencies  []time.Duration
+	readTTFBs      []time.Duration
+	writeLatencies []time.Duration
+	consLatencies  []time.Duration
+	readSuccess    int64
+	readErrors     int64
+	writeSuccess   int64
+	writeErrors    int64
+	consImmediate  int64
+	consEventual   int64
+	consFailed     int64
+}
+
 // TranscodeTest implements the Test interface for transcoding workload testing
 type TranscodeTest struct {
 	validator *TigrisValidator
@@ -157,7 +172,6 @@ func (t *TranscodeTest) Run(ctx context.Context) TestStatus {
 		Bucket: aws.String(t.validator.config.BucketName),
 		Key:    aws.String(testKey),
 	})
-
 	if err != nil {
 		// Source files don't exist, run setup
 		fmt.Printf("\n%s", strings.Repeat("-", 60))
@@ -256,21 +270,6 @@ func (t *TranscodeTest) Cleanup(ctx context.Context) error {
 	return nil
 }
 
-// workerTranscodeMetrics holds per-worker metrics to avoid lock contention
-type workerTranscodeMetrics struct {
-	readLatencies  []time.Duration
-	readTTFBs      []time.Duration
-	writeLatencies []time.Duration
-	consLatencies  []time.Duration
-	readSuccess    int64
-	readErrors     int64
-	writeSuccess   int64
-	writeErrors    int64
-	consImmediate  int64
-	consEventual   int64
-	consFailed     int64
-}
-
 // runTranscodeSimulation simulates the transcoding workload
 func (t *TranscodeTest) runTranscodeSimulation(ctx context.Context) (*TranscodeMetrics, *TranscodeMetrics, *ConsistencyMetrics) {
 	cfg := t.validator.config.TranscodeConfig
@@ -358,21 +357,17 @@ func (t *TranscodeTest) runTranscodeSimulation(ctx context.Context) (*TranscodeM
 						localMetrics.writeErrors++
 					}
 
-					// 3. Immediately read back to check consistency
+					// 3. Read-after-write consistency check
 					if writeResult.Success {
-						readStart := time.Now()
-						readBackResult := ops.GetObject(simCtx, outputKey)
-						readBackLatency := time.Since(readStart)
+						immediate, eventual, failed, convergenceTime := checkReadAfterWriteConsistency(simCtx, ops, outputKey)
 
-						// Collect metrics without locks
-						if readBackResult.Success {
-							localMetrics.consLatencies = append(localMetrics.consLatencies, readBackLatency)
-							if readBackLatency < 200*time.Millisecond {
-								localMetrics.consImmediate++
-							} else {
-								localMetrics.consEventual++
-							}
-						} else {
+						if immediate {
+							localMetrics.consImmediate++
+							localMetrics.consLatencies = append(localMetrics.consLatencies, convergenceTime)
+						} else if eventual {
+							localMetrics.consEventual++
+							localMetrics.consLatencies = append(localMetrics.consLatencies, convergenceTime)
+						} else if failed {
 							localMetrics.consFailed++
 						}
 					}
@@ -525,6 +520,47 @@ func (t *TranscodeTest) displayResults(read, write *TranscodeMetrics, cons *Cons
 	}
 	fmt.Printf("  Target (<200ms): %s%.1f%% within target%s\n",
 		targetColor, cons.TargetMetPercentage, ColorReset)
+}
+
+// checkReadAfterWriteConsistency performs a read-after-write consistency check
+// Returns: (immediate bool, eventual bool, failed bool, convergenceTime time.Duration)
+func checkReadAfterWriteConsistency(ctx context.Context, ops *workload.S3Operations, key string) (bool, bool, bool, time.Duration) {
+	const (
+		maxRetries      = 600
+		retryInterval   = 100 * time.Millisecond
+		maxWaitDuration = 1 * time.Minute
+	)
+
+	startTime := time.Now()
+	attempts := 0
+
+	// Retry until object is readable or timeout
+	for attempts < maxRetries {
+		readBackResult := ops.GetObject(ctx, key)
+
+		if readBackResult.Success {
+			// Object read successfully
+			convergenceTime := time.Duration(attempts) * retryInterval
+
+			if attempts == 0 {
+				// Immediate consistency - success on first try
+				return true, false, false, convergenceTime
+			}
+			// Eventual consistency - success after retries
+			return false, true, false, convergenceTime
+		}
+
+		// Check if we've exceeded max wait time
+		if time.Since(startTime) > maxWaitDuration {
+			break
+		}
+
+		attempts++
+		time.Sleep(retryInterval)
+	}
+
+	// Timeout or max retries exceeded
+	return false, false, true, 0
 }
 
 // Helper functions for statistics

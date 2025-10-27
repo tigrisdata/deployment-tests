@@ -78,4 +78,5 @@ type TestConfig struct {
 	RunPerformance    bool
 	RunTranscode      bool
 	TranscodeConfig   TranscodeConfig // Transcoding test configuration
+	Verbose           bool            // Enable verbose logging for all tests
 }

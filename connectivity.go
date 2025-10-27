@@ -60,6 +60,10 @@ func (t *ConnectivityTest) Run(ctx context.Context) TestStatus {
 		s3Duration, err := t.testS3Connectivity("global")
 		if err != nil {
 			fmt.Printf("  S3 Connectivity: %sFAILED%s - %v\n", ColorBrightRed, ColorReset, err)
+			if t.validator.config.Verbose {
+				fmt.Printf("    [VERBOSE] Endpoint: %s, Bucket: %s, Duration: %v, Error: %v\n",
+					t.validator.config.GlobalEndpoint, t.validator.config.BucketName, s3Duration, err)
+			}
 			allPassed = false
 			details["global"] = map[string]interface{}{
 				"passed":   false,
@@ -82,6 +86,10 @@ func (t *ConnectivityTest) Run(ctx context.Context) TestStatus {
 		s3Duration, err := t.testS3Connectivity(endpoint)
 		if err != nil {
 			fmt.Printf("  S3 Connectivity: %sFAILED%s - %v\n", ColorBrightRed, ColorReset, err)
+			if t.validator.config.Verbose {
+				fmt.Printf("    [VERBOSE] Endpoint: %s, Bucket: %s, Duration: %v, Error: %v\n",
+					endpoint, t.validator.config.BucketName, s3Duration, err)
+			}
 			allPassed = false
 			details[endpoint] = map[string]interface{}{
 				"passed":   false,

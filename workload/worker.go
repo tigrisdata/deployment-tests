@@ -2,6 +2,7 @@ package workload
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"sync"
 	"time"
@@ -149,6 +150,9 @@ func (wp *WorkerPool) runWorkerFixedOps(ctx context.Context, workerID int, seed 
 			}
 		} else {
 			errorOps++
+			if wp.config.Verbose {
+				fmt.Printf("[Worker %d] Operation failed: op=%d, error=%v\n", workerID, opIndex, result.Error)
+			}
 		}
 	}
 
@@ -210,6 +214,9 @@ func (wp *WorkerPool) runWorkerDuration(ctx context.Context, workerID int, seed 
 			}
 		} else {
 			errorOps++
+			if wp.config.Verbose {
+				fmt.Printf("[Worker %d] Operation failed: op=%d, error=%v\n", workerID, opIndex, result.Error)
+			}
 		}
 
 		opIndex++

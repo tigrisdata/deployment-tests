@@ -337,6 +337,10 @@ func (t *TranscodeTest) runTranscodeSimulation(ctx context.Context) (*TranscodeM
 						localMetrics.readTTFBs = append(localMetrics.readTTFBs, readResult.TTFB)
 					} else {
 						localMetrics.readErrors++
+						if t.validator.config.Verbose {
+							fmt.Printf("[Job %d] Read failed: key=%s, range=%d-%d, error=%v\n",
+								jobID, sourceKey, startByte, endByte, readResult.Error)
+						}
 					}
 
 					// 2. Write output segment (small file)
@@ -355,6 +359,10 @@ func (t *TranscodeTest) runTranscodeSimulation(ctx context.Context) (*TranscodeM
 						localMetrics.writeLatencies = append(localMetrics.writeLatencies, writeResult.Duration)
 					} else {
 						localMetrics.writeErrors++
+						if t.validator.config.Verbose {
+							fmt.Printf("[Job %d] Write failed: key=%s, size=%d, error=%v\n",
+								jobID, outputKey, segmentSize, writeResult.Error)
+						}
 					}
 
 					// 3. Read-after-write consistency check
@@ -367,8 +375,16 @@ func (t *TranscodeTest) runTranscodeSimulation(ctx context.Context) (*TranscodeM
 						} else if eventual {
 							localMetrics.consEventual++
 							localMetrics.consLatencies = append(localMetrics.consLatencies, convergenceTime)
+							if t.validator.config.Verbose {
+								fmt.Printf("[Job %d] Eventual consistency: key=%s, convergence=%v\n",
+									jobID, outputKey, convergenceTime)
+							}
 						} else if failed {
 							localMetrics.consFailed++
+							if t.validator.config.Verbose {
+								fmt.Printf("[Job %d] Consistency check failed: key=%s (timeout)\n",
+									jobID, outputKey)
+							}
 						}
 					}
 				}

@@ -251,6 +251,7 @@ func main() {
 		globalEndpoint    = flag.String("global-endpoint", DefaultGlobalEndpoint, "Global Tigris endpoint URL")
 		regionalEndpoints = flag.String("regional-endpoints", strings.Join([]string{DefaultRegionalEndpointIAD, DefaultRegionalEndpointORD, DefaultRegionalEndpointSJC}, ","), "Comma-separated list of regional Tigris endpoints")
 		tests             = flag.String("tests", DefaultTests, "Comma-separated list of tests to run: connectivity,consistency,performance,transcode (default: all)")
+		verbose           = flag.Bool("verbose", false, "Enable verbose logging of failures")
 	)
 	flag.Parse()
 
@@ -317,6 +318,7 @@ func main() {
 		RunPerformance:    runPerformance,
 		RunTranscode:      runTranscode,
 		TranscodeConfig:   DefaultTranscodeConfig,
+		Verbose:           *verbose,
 	}
 
 	// Create performance tester

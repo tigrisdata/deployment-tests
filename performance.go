@@ -224,6 +224,7 @@ func (t *PerformanceTest) runPerformanceBenchmark(operation string, size Benchma
 		ReuseObjects:    false,
 		UseMultipart:    size.UseMultipart,  // Enable multipart for large objects
 		MultipartSize:   size.MultipartSize, // Part size for multipart uploads
+		Verbose:         t.validator.config.Verbose,
 	}
 
 	// Get S3 client for endpoint

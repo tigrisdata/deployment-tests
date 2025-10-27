@@ -61,7 +61,7 @@ var DefaultTranscodeConfig = TranscodeConfig{
 	ChunkSize:       100 * 1024 * 1024,       // 100 MB chunks (range reads)
 	SegmentSizeMin:  1 * 1024 * 1024,         // 1 MB min segment
 	SegmentSizeMax:  6 * 1024 * 1024,         // 6 MB max segment
-	JobCount:        100,                     // 100 parallel encoding jobs
+	JobCount:        200,                     // 200 parallel encoding jobs
 	TestDuration:    5 * time.Minute,         // 5 minute test duration
 }
 

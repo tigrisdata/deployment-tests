@@ -2,6 +2,7 @@ package workload
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"sync"
 	"time"
@@ -111,9 +112,13 @@ func (wp *WorkerPool) runWorkerFixedOps(ctx context.Context, workerID int, seed 
 
 	var successOps, errorOps, totalBytes int64
 
-	// Generate per-worker data buffer (for PUT operations)
+	// For small objects (<=10MB), generate once and reuse for efficiency
+	// For large objects (>10MB), generate per-operation using streaming
 	var data []byte
-	if wp.config.OperationType == OpPUT || wp.config.OperationType == OpMIXED {
+	useStreamingUpload := wp.config.ObjectSize > ChunkedGenerationThreshold
+
+	if !useStreamingUpload && (wp.config.OperationType == OpPUT || wp.config.OperationType == OpMIXED) {
+		// Small object: generate once and reuse
 		data = generateDataWithRNG(localRng, wp.config.ObjectSize)
 	}
 
@@ -145,6 +150,9 @@ func (wp *WorkerPool) runWorkerFixedOps(ctx context.Context, workerID int, seed 
 			}
 		} else {
 			errorOps++
+			if wp.config.Verbose {
+				fmt.Printf("[Worker %d] Operation failed: op=%d, error=%v\n", workerID, opIndex, result.Error)
+			}
 		}
 	}
 
@@ -206,6 +214,9 @@ func (wp *WorkerPool) runWorkerDuration(ctx context.Context, workerID int, seed 
 			}
 		} else {
 			errorOps++
+			if wp.config.Verbose {
+				fmt.Printf("[Worker %d] Operation failed: op=%d, error=%v\n", workerID, opIndex, result.Error)
+			}
 		}
 
 		opIndex++
@@ -220,13 +231,24 @@ func (wp *WorkerPool) executeOperation(ctx context.Context, ops *S3Operations, w
 	// Execute the appropriate operation
 	switch wp.config.OperationType {
 	case OpPUT:
+		// Use streaming upload for large objects, byte slice for small
+		if wp.config.ObjectSize > ChunkedGenerationThreshold {
+			return ops.PutObjectAuto(ctx, key, wp.config.ObjectSize)
+		}
 		return ops.PutObject(ctx, key, data)
 	case OpGET:
 		return ops.GetObject(ctx, key)
 	case OpMIXED:
 		// Decide whether to read or write based on ratio
 		shouldRead := rng.Float64() < wp.config.ReadWriteRatio
-		return ops.MixedOperation(ctx, key, data, shouldRead)
+		if shouldRead {
+			return ops.GetObject(ctx, key)
+		}
+		// For writes, use streaming for large objects
+		if wp.config.ObjectSize > ChunkedGenerationThreshold {
+			return ops.PutObjectAuto(ctx, key, wp.config.ObjectSize)
+		}
+		return ops.PutObject(ctx, key, data)
 	default:
 		return OperationResult{Success: false, Error: &ConfigError{Field: "OperationType", Message: "unknown operation type"}}
 	}

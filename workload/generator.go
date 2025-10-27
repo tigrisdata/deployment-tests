@@ -11,58 +11,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
-// WorkloadGenerator orchestrates workload generation and benchmark execution
-type WorkloadGenerator struct {
-	config       *WorkloadConfig
-	awsConfig    s3.Options      // S3 options from original client
-	s3Options    []func(*s3.Options) // Additional S3 options for client creation
-	keyGen       *KeyGenerator
-	workerSeeds  []int64
-}
+// CreateWorkerS3Client creates a new S3 client with an isolated HTTP connection pool
+// This should be called per-worker goroutine to ensure each worker has dedicated connections
+func CreateWorkerS3Client(baseClient *s3.Client) *s3.Client {
+	// Get original options from base client
+	originalOptions := baseClient.Options()
 
-// NewGenerator creates a new workload generator
-func NewGenerator(config WorkloadConfig, s3Client *s3.Client) (*WorkloadGenerator, error) {
-	// Validate configuration
-	if err := config.Validate(); err != nil {
-		return nil, err
-	}
-
-	// Store S3-specific options for recreating clients
-	// We need to capture the options from the original client
-	originalOptions := s3Client.Options()
-	s3Options := []func(*s3.Options){
-		func(o *s3.Options) {
-			// Copy all relevant options from the original client
-			o.UsePathStyle = originalOptions.UsePathStyle
-			o.BaseEndpoint = originalOptions.BaseEndpoint
-			o.Region = originalOptions.Region
-			o.Credentials = originalOptions.Credentials
-			o.RetryMaxAttempts = originalOptions.RetryMaxAttempts
-			o.RetryMode = originalOptions.RetryMode
-		},
-	}
-
-	// Initialize key generator
-	keyGen := NewKeyGenerator(config.Prefix, config.RecordCount, config.KeyDistribution, config.Concurrency)
-
-	// Generate worker seeds for reproducibility
-	masterRng := rand.New(rand.NewSource(config.Seed))
-	workerSeeds := make([]int64, config.Concurrency)
-	for i := 0; i < config.Concurrency; i++ {
-		workerSeeds[i] = masterRng.Int63()
-	}
-
-	return &WorkloadGenerator{
-		config:      &config,
-		awsConfig:   originalOptions,
-		s3Options:   s3Options,
-		keyGen:      keyGen,
-		workerSeeds: workerSeeds,
-	}, nil
-}
-
-// createWorkerClient creates a new S3Operations for a worker with its own HTTP connection pool
-func (wg *WorkloadGenerator) createWorkerClient() *S3Operations {
 	// Create a new HTTP client with optimized settings for each worker
 	// This ensures each worker has its own connection pool
 	httpClient := &http.Client{
@@ -78,25 +32,72 @@ func (wg *WorkloadGenerator) createWorkerClient() *S3Operations {
 		Timeout: 5 * time.Minute,
 	}
 
-	// Build AWS config from the stored options
+	// Build AWS config from the original client
 	awsCfg := aws.Config{
-		Region:      wg.awsConfig.Region,
-		Credentials: wg.awsConfig.Credentials,
-		RetryMode:   wg.awsConfig.RetryMode,
+		Region:      originalOptions.Region,
+		Credentials: originalOptions.Credentials,
+		RetryMode:   originalOptions.RetryMode,
 	}
-	if wg.awsConfig.RetryMaxAttempts > 0 {
-		awsCfg.RetryMaxAttempts = wg.awsConfig.RetryMaxAttempts
+	if originalOptions.RetryMaxAttempts > 0 {
+		awsCfg.RetryMaxAttempts = originalOptions.RetryMaxAttempts
 	}
 
-	// Create a new S3 client with worker-specific HTTP client and original S3 options
-	clientOptions := append(wg.s3Options, func(o *s3.Options) {
-		o.HTTPClient = httpClient
-	})
+	// Create S3 options copying from original
+	s3Options := []func(*s3.Options){
+		func(o *s3.Options) {
+			o.UsePathStyle = originalOptions.UsePathStyle
+			o.BaseEndpoint = originalOptions.BaseEndpoint
+			o.Region = originalOptions.Region
+			o.Credentials = originalOptions.Credentials
+			o.RetryMaxAttempts = originalOptions.RetryMaxAttempts
+			o.RetryMode = originalOptions.RetryMode
+			o.HTTPClient = httpClient // Set worker-specific HTTP client
+		},
+	}
 
-	s3Client := s3.NewFromConfig(awsCfg, clientOptions...)
+	return s3.NewFromConfig(awsCfg, s3Options...)
+}
+
+// WorkloadGenerator orchestrates workload generation and benchmark execution
+type WorkloadGenerator struct {
+	config      *WorkloadConfig
+	baseClient  *s3.Client  // Base S3 client to clone for workers
+	keyGen      *KeyGenerator
+	workerSeeds []int64
+}
+
+// NewGenerator creates a new workload generator
+func NewGenerator(config WorkloadConfig, s3Client *s3.Client) (*WorkloadGenerator, error) {
+	// Validate configuration
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
+
+	// Initialize key generator
+	keyGen := NewKeyGenerator(config.Prefix, config.RecordCount, config.KeyDistribution, config.Concurrency)
+
+	// Generate worker seeds for reproducibility
+	masterRng := rand.New(rand.NewSource(config.Seed))
+	workerSeeds := make([]int64, config.Concurrency)
+	for i := 0; i < config.Concurrency; i++ {
+		workerSeeds[i] = masterRng.Int63()
+	}
+
+	return &WorkloadGenerator{
+		config:      &config,
+		baseClient:  s3Client,
+		keyGen:      keyGen,
+		workerSeeds: workerSeeds,
+	}, nil
+}
+
+// createWorkerClient creates a new S3Operations for a worker with its own HTTP connection pool
+func (wg *WorkloadGenerator) createWorkerClient() *S3Operations {
+	// Use the exported function to create a worker-specific S3 client
+	workerClient := CreateWorkerS3Client(wg.baseClient)
 
 	// Wrap in S3Operations
-	return NewS3Operations(s3Client, wg.config.Bucket, wg.config.UseMultipart, wg.config.MultipartSize)
+	return NewS3Operations(workerClient, wg.config.Bucket, wg.config.UseMultipart, wg.config.MultipartSize)
 }
 
 // Preload executes the preload phase, uploading objects to S3

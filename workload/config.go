@@ -62,6 +62,9 @@ type WorkloadConfig struct {
 	// Multipart Upload Options
 	UseMultipart  bool  // Enable multipart upload for PUT operations
 	MultipartSize int64 // Part size for multipart uploads (0 = auto: 10 MiB)
+
+	// Logging
+	Verbose bool // Enable verbose logging of failures
 }
 
 // Validate checks if the configuration is valid

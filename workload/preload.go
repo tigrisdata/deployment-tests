@@ -49,9 +49,16 @@ func (p *PreloadPhase) Run(ctx context.Context) error {
 			// Create per-worker S3 client for isolated connection pool
 			workerOps := p.clientFactory()
 
-			// Per-worker RNG for data generation
-			localRng := rand.New(rand.NewSource(s))
-			data := generateDataWithRNG(localRng, p.config.ObjectSize)
+			// For small objects (<=10MB), generate once and reuse for efficiency
+			// For large objects (>10MB), generate per-upload using streaming
+			var data []byte
+			useStreamingUpload := p.config.ObjectSize > ChunkedGenerationThreshold
+
+			if !useStreamingUpload {
+				// Small object: generate once and reuse
+				localRng := rand.New(rand.NewSource(s))
+				data = generateDataWithRNG(localRng, p.config.ObjectSize)
+			}
 
 			for i := 0; i < recordsPerWorker; i++ {
 				// Check for context cancellation every 100 objects (optimization)
@@ -64,7 +71,15 @@ func (p *PreloadPhase) Run(ctx context.Context) error {
 				}
 
 				key := p.keyGen.PreloadKey(wID, i)
-				result := workerOps.PutObject(ctx, key, data)
+
+				var result OperationResult
+				if useStreamingUpload {
+					// Large object: use streaming upload (generates data on-demand)
+					result = workerOps.PutObjectAuto(ctx, key, p.config.ObjectSize)
+				} else {
+					// Small object: use pre-generated data
+					result = workerOps.PutObject(ctx, key, data)
+				}
 
 				if result.Success {
 					successCount.Add(1)

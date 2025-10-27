@@ -33,8 +33,8 @@ The test suite includes four types of tests that can be run independently or tog
 
 ### **Transcoding Workload Tests** (simulates video transcoding workloads)
 
-- **Large File Range Reads**: Simulates encoders reading chunks from large source files (90GB+)
-  - Uses HTTP range requests to read 200MB chunks
+- **Large File Range Reads**: Simulates encoders reading chunks from large source files (10GB+)
+  - Uses HTTP range requests to read 100MB chunks
   - Measures TTFB and download latency for range requests
   - Tests parallel access to large files from multiple workers
 - **Small File Burst Writes**: Simulates writing encoded video segments (1-6MB)
@@ -44,8 +44,8 @@ The test suite includes four types of tests that can be run independently or tog
   - Tests consistency of written segments across global endpoint
   - Tracks percentage meeting latency target
   - Reports immediate vs. eventual consistency distribution
-- **Configurable Duration**: Default 5-minute test with 100 parallel jobs
-- **Source Files**: 10 × 90GB source files (configurable in code)
+- **Configurable Duration**: Default 5-minute test with 200 parallel jobs
+- **Source Files**: 10 × 10GB source files (configurable in code)
 
 ## Features
 
@@ -94,13 +94,13 @@ The test suite includes four types of tests that can be run independently or tog
 
 ### Command Line Options
 
-| Flag                  | Description                                                                        | Default                                                                 |
-| --------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `-bucket`             | S3 bucket name (required)                                                          | -                                                                       |
-| `-concurrency`        | Number of concurrent operations                                                    | 20                                                                      |
-| `-prefix`             | S3 key prefix                                                                      | perf-test                                                               |
-| `-global-endpoint`    | Global S3 endpoint URL                                                             | https://oracle.storage.dev                                              |
-| `-regional-endpoints` | Comma-separated regional endpoints                                                 | https://iad.storage.dev,https://ord.storage.dev,https://sjc.storage.dev |
+| Flag                  | Description                                                                                     | Default                                                                 |
+| --------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `-bucket`             | S3 bucket name (required)                                                                       | -                                                                       |
+| `-concurrency`        | Number of concurrent operations                                                                 | 20                                                                      |
+| `-prefix`             | S3 key prefix                                                                                   | perf-test                                                               |
+| `-global-endpoint`    | Global S3 endpoint URL                                                                          | https://oracle.storage.dev                                              |
+| `-regional-endpoints` | Comma-separated regional endpoints                                                              | https://iad.storage.dev,https://ord.storage.dev,https://sjc.storage.dev |
 | `-tests`              | Comma-separated list of tests to run: `connectivity`, `consistency`, `performance`, `transcode` | all                                                                     |
 
 ### Examples
@@ -108,62 +108,43 @@ The test suite includes four types of tests that can be run independently or tog
 **Basic test suite (all tests):**
 
 ```bash
-./t3-validator -bucket my-test-bucket \
-  -global-endpoint https://t3.storage.dev \
-  -regional-endpoints https://iad1.storage.dev,https://sjc.storage.dev
+./t3-validator -bucket my-bucket
 ```
 
 **Run only connectivity and consistency tests:**
 
 ```bash
-./t3-validator -bucket my-bucket \
-  -global-endpoint https://t3.storage.dev \
-  -regional-endpoints https://iad1.storage.dev,https://sjc.storage.dev \
-  -tests connectivity,consistency
+./t3-validator -bucket my-bucket -tests connectivity,consistency
 ```
 
 **Run only consistency tests:**
 
 ```bash
-./t3-validator -bucket my-bucket \
-  -global-endpoint https://t3.storage.dev \
-  -regional-endpoints https://iad1.storage.dev,https://sjc.storage.dev \
-  -tests consistency
+./t3-validator -bucket my-bucket -tests consistency
 ```
 
-**Run only performance tests (skip connectivity and consistency):**
+**Run only performance tests:**
 
 ```bash
-./t3-validator -bucket my-bucket \
-  -global-endpoint https://t3.storage.dev \
-  -regional-endpoints https://iad1.storage.dev,https://sjc.storage.dev \
-  -tests performance
+./t3-validator -bucket my-bucket -tests performance
 ```
 
 **Run performance tests with custom concurrency:**
 
 ```bash
-./t3-validator -bucket my-bucket \
-  -global-endpoint https://t3.storage.dev \
-  -regional-endpoints https://iad1.storage.dev,https://sjc.storage.dev \
-  -tests performance \
-  -concurrency 50
+./t3-validator -bucket my-bucket -tests performance -concurrency 50
 ```
 
 **Run transcoding workload test:**
 
 ```bash
-./t3-validator -bucket my-bucket \
-  -global-endpoint https://oracle.storage.dev \
-  -tests transcode
+./t3-validator -bucket my-bucket -tests transcode
 ```
 
 **Run multiple test types:**
 
 ```bash
-./t3-validator -bucket my-bucket \
-  -global-endpoint https://oracle.storage.dev \
-  -tests consistency,transcode
+./t3-validator -bucket my-bucket -tests consistency,transcode
 ```
 
 ## Test Results
@@ -174,54 +155,61 @@ The tool provides comprehensive performance metrics:
 
 ```
 ================================================================================
-CONNECTIVITY TESTS
+ CONNECTIVITY TESTS
 ================================================================================
 
-Testing Global Endpoint: https://t3.storage.dev
-  S3 Connectivity: SUCCESS - 245ms
+Testing Global Endpoint: https://oracle.storage.dev
+  S3 Connectivity: SUCCESS - 37.504ms
+
+Testing Regional Endpoint: https://iad.storage.dev
+  S3 Connectivity: SUCCESS - 24.337ms
+
+Testing Regional Endpoint: https://ord.storage.dev
+  S3 Connectivity: SUCCESS - 172.161ms
 
 Testing Regional Endpoint: https://sjc.storage.dev
-  S3 Connectivity: SUCCESS - 198ms
+  S3 Connectivity: SUCCESS - 410.564ms
 ```
 
 ### Consistency Results
 
 ```
 ================================================================================
-CONSISTENCY TESTS
+ CONSISTENCY TESTS
 ================================================================================
 
-Testing Global Endpoint: https://t3.storage.dev
+Testing Global Endpoint: https://oracle.storage.dev
 
 PUT|GET (Read-After-Write Consistency) (50 iterations)
   global -> global (50 iterations)
     Convergence - Avg:       0s, P95:       0s, P99:       0s
     Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
   global -> iad (50 iterations)
-    Convergence - Avg: 406.000ms, P95: 900.000ms, P99:   1.100s
-    Distribution - Immediate:   0.0%, Eventual: 100.0%, Timeout:   0.0%
-  global -> ord1 (50 iterations)
-    Convergence - Avg:  7.000ms, P95: 100.000ms, P99: 200.000ms
-    Distribution - Immediate:  95.0%, Eventual:   5.0%, Timeout:   0.0%
+    Convergence - Avg:       0s, P95:       0s, P99:       0s
+    Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
+  global -> ord (50 iterations)
+    Convergence - Avg:       0s, P95:       0s, P99:       0s
+    Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
   global -> sjc (50 iterations)
     Convergence - Avg:       0s, P95:       0s, P99:       0s
     Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
-  SUCCESS - Read-After-Write Consistency test completed (145.779s)
+  SUCCESS - Read-After-Write Consistency test completed (28.100s)
 
-PUT|LIST (List-After-Write Consistency) (50 iterations)
-  global -> global (50 iterations)
+
+PUT|LIST (List-After-Write Consistency) (10 iterations)
+  global -> global (10 iterations)
     Convergence - Avg:       0s, P95:       0s, P99:       0s
     Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
-  global -> iad (50 iterations)
-    Convergence - Avg: 500.000ms, P95:   1.000s, P99:   1.500s
+  global -> iad (10 iterations)
+    Convergence - Avg:       0s, P95:       0s, P99:       0s
+    Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
+  global -> ord (10 iterations)
+    Convergence - Avg: 440.000ms, P95: 700.000ms, P99: 700.000ms
     Distribution - Immediate:   0.0%, Eventual: 100.0%, Timeout:   0.0%
-  global -> ord1 (50 iterations)
+  global -> sjc (10 iterations)
     Convergence - Avg:       0s, P95:       0s, P99:       0s
     Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
-  global -> sjc (50 iterations)
-    Convergence - Avg:       0s, P95:       0s, P99:       0s
-    Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
-  SUCCESS - List-After-Write Consistency test completed (52.3s)
+  SUCCESS - List-After-Write Consistency test completed (8.404s)
 ```
 
 ### Performance Results
@@ -231,32 +219,36 @@ PUT|LIST (List-After-Write Consistency) (50 iterations)
  PERFORMANCE TESTS
 ================================================================================
 
-Testing Endpoint: https://t3.storage.dev
+Configuration:
+  Concurrency: 20
+  Benchmark Sizes: 1 MiB, 10 MiB, 100 MiB
+
+Testing Endpoint: global
 ------------------------------------------------------------
 PUT Performance Tests:
   Testing 1 MiB (100 records, 1000 ops)...
-    Latency    - Avg:   76.848ms, P95:  122.042ms, P99:  164.746ms
-    Throughput -  224.674 MB/s |  224.674 ops/s | 1000 success
+    Latency    - Avg:   81.481ms, P95:  135.375ms, P99:  186.596ms
+    Throughput -     1.83 Gbps |  228.531 ops/s | 1000 success
   Testing 10 MiB (100 records, 1000 ops)...
-    Latency    - Avg:  186.293ms, P95:  250.002ms, P99:  382.832ms
-    Throughput -  847.265 MB/s |   84.726 ops/s | 1000 success
+    Latency    - Avg:  222.576ms, P95:  341.281ms, P99:  643.780ms
+    Throughput -     4.84 Gbps |   60.505 ops/s | 1000 success
   Testing 100 MiB (10 records, 100 ops, multipart: 10 MiB parts)...
-    Latency    - Avg:  833.991ms, P95:  986.061ms, P99:     2.554s
-    Throughput -  729.186 MB/s |    7.292 ops/s | 100 success
+    Latency    - Avg:     1.005s, P95:     1.303s, P99:     9.089s
+    Throughput -     5.25 Gbps |    6.559 ops/s | 100 success
 
 GET Performance Tests:
   Testing 1 MiB (100 records, 1000 ops)...
-    Latency    - Avg:   29.874ms, P95:   47.641ms, P99:   91.357ms
-    TTFB       - Avg:   20.464ms, P95:   37.175ms, P99:   73.371ms
-    Throughput -  467.864 MB/s |  467.864 ops/s | 1000 success
+    Latency    - Avg:   28.458ms, P95:   41.117ms, P99:   97.337ms
+    TTFB       - Avg:   19.454ms, P95:   31.146ms, P99:   88.739ms
+    Throughput -     3.71 Gbps |  464.342 ops/s | 1000 success
   Testing 10 MiB (100 records, 1000 ops)...
-    Latency    - Avg:  119.839ms, P95:  165.933ms, P99:  260.861ms
-    TTFB       - Avg:   24.100ms, P95:   54.530ms, P99:   96.673ms
-    Throughput - 1319.319 MB/s |  131.932 ops/s | 1000 success
+    Latency    - Avg:  110.844ms, P95:  166.582ms, P99:  254.632ms
+    TTFB       - Avg:   20.451ms, P95:   43.849ms, P99:   93.251ms
+    Throughput -    12.59 Gbps |  157.419 ops/s | 1000 success
   Testing 100 MiB (10 records, 100 ops)...
-    Latency    - Avg:  750.610ms, P95:     1.024s, P99:     1.117s
-    TTFB       - Avg:   75.061ms, P95:  102.399ms, P99:  111.651ms
-    Throughput - 2035.193 MB/s |   20.352 ops/s | 100 success
+    Latency    - Avg:  725.410ms, P95:     1.084s, P99:     1.609s
+    TTFB       - Avg:   72.541ms, P95:  108.444ms, P99:  160.942ms
+    Throughput -    15.92 Gbps |   19.902 ops/s | 100 success
 ```
 
 ### Transcoding Workload Results
@@ -267,37 +259,31 @@ GET Performance Tests:
 ================================================================================
 
 Configuration:
-  Source Files: 10 × 90.0 GiB
-  Chunk Size: 200.0 MiB (range reads)
-  Segment Size: 1.0 MiB - 6.0 MiB
-  Parallel Jobs: 100
-  Duration: 5m0s
-
+  Source Files: 10 files, 10.0 GiB each
+  Chunk Size: 100.0 MiB per read
+  Segment Size: 1.0 MiB - 6.0 MiB per write
+  Parallel Jobs: 200 parallel jobs
+  Test Duration: 5m0s
 ------------------------------------------------------------
-Setup Phase: Uploading 10 source files (90 GB each)...
-  Progress: 10/10 files uploaded
-  Completed: 10 files (900.0 GiB total) in 15m23.456s
+Transcoding Simulation (200 parallel jobs, 5m0s duration):
 
-------------------------------------------------------------
-Transcoding Simulation (100 parallel jobs, 5m0s duration):
-
-Read Operations (Range Requests, 200.0 MiB chunks):
-  Latency    - Avg:  245.123ms, P95:  456.789ms, P99:  892.345ms
-  TTFB       - Avg:   45.678ms, P95:   89.123ms, P99:  156.789ms
-  Throughput - 6.17 ops/s | 45823 success
+Read Operations (Range Requests, 100.0 MiB chunks):
+  Latency    - Avg:     6.096s, P95:    10.411s, P99:    11.996s
+  TTFB       - Avg:   83.735ms, P95:  202.869ms, P99:  370.036ms
+  Throughput - 28.16 ops/s (23.62 Gbps) | 8447 success
 
 Write Operations (Output Segments, 1.0 MiB - 6.0 MiB):
-  Latency    - Avg:   87.234ms, P95:  145.678ms, P99:  234.567ms
-  Throughput - 123.45 ops/s | 37046 success
+  Latency    - Avg:  699.104ms, P95:     1.071s, P99:     6.621s
+  Throughput - 28.16 ops/s (0.83 Gbps) | 8447 success
 
 Read-After-Write Consistency:
-  Convergence - Avg:   12.345ms, P95:   78.901ms, P99:  156.789ms
-  Distribution - Immediate (<200ms): 98.5%, Eventual (>200ms):  1.5%, Failed:  0.0%
-  Target (<200ms): 98.5% within target
+  Convergence - Avg:      0s, P95:      0s, P99:      0s
+  Distribution - Immediate (<200ms): 100.0%, Eventual (>200ms):   0.0%, Failed:   0.0%
+  Target (<200ms): 100.0% within target
 
 Cleanup Phase: Removing test objects... DONE
 
-Total Duration: 21m57s
+Total Duration: 433.915s
 ```
 
 ## AWS Credentials

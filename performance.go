@@ -96,14 +96,15 @@ func (t *PerformanceTest) Run(ctx context.Context) TestStatus {
 
 			// Display throughput metrics
 			if result.SuccessOps > 0 {
+				throughputGbps := (result.ThroughputMBps * 8) / 1000 // Convert MB/s to Gbps
 				if result.ErrorOps > 0 {
-					fmt.Printf("    Throughput - %s%8.3f MB/s%s | %s%8.3f ops/s%s | %s%d success, %d failed%s\n",
-						ColorBrightWhite, result.ThroughputMBps, ColorReset,
+					fmt.Printf("    Throughput - %s%8.2f Gbps%s | %s%8.3f ops/s%s | %s%d success, %d failed%s\n",
+						ColorBrightWhite, throughputGbps, ColorReset,
 						ColorBrightWhite, result.OpsPerSecond, ColorReset,
 						ColorBrightGreen, result.SuccessOps, result.ErrorOps, ColorReset)
 				} else {
-					fmt.Printf("    Throughput - %s%8.3f MB/s%s | %s%8.3f ops/s%s | %s%d success%s\n",
-						ColorBrightWhite, result.ThroughputMBps, ColorReset,
+					fmt.Printf("    Throughput - %s%8.2f Gbps%s | %s%8.3f ops/s%s | %s%d success%s\n",
+						ColorBrightWhite, throughputGbps, ColorReset,
 						ColorBrightWhite, result.OpsPerSecond, ColorReset,
 						ColorBrightGreen, result.SuccessOps, ColorReset)
 				}
@@ -148,14 +149,15 @@ func (t *PerformanceTest) Run(ctx context.Context) TestStatus {
 
 			// Display throughput metrics
 			if result.SuccessOps > 0 {
+				throughputGbps := (result.ThroughputMBps * 8) / 1000 // Convert MB/s to Gbps
 				if result.ErrorOps > 0 {
-					fmt.Printf("    Throughput - %s%8.3f MB/s%s | %s%8.3f ops/s%s | %s%d success, %d failed%s\n",
-						ColorBrightWhite, result.ThroughputMBps, ColorReset,
+					fmt.Printf("    Throughput - %s%8.2f Gbps%s | %s%8.3f ops/s%s | %s%d success, %d failed%s\n",
+						ColorBrightWhite, throughputGbps, ColorReset,
 						ColorBrightWhite, result.OpsPerSecond, ColorReset,
 						ColorBrightGreen, result.SuccessOps, result.ErrorOps, ColorReset)
 				} else {
-					fmt.Printf("    Throughput - %s%8.3f MB/s%s | %s%8.3f ops/s%s | %s%d success%s\n",
-						ColorBrightWhite, result.ThroughputMBps, ColorReset,
+					fmt.Printf("    Throughput - %s%8.2f Gbps%s | %s%8.3f ops/s%s | %s%d success%s\n",
+						ColorBrightWhite, throughputGbps, ColorReset,
 						ColorBrightWhite, result.OpsPerSecond, ColorReset,
 						ColorBrightGreen, result.SuccessOps, ColorReset)
 				}

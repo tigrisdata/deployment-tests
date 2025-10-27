@@ -328,7 +328,11 @@ func (t *TranscodeTest) runTranscodeSimulation(ctx context.Context) (*TranscodeM
 					startByte := workerRng.Int63n(maxOffset + 1)
 					endByte := startByte + cfg.ChunkSize - 1
 
-					readResult := ops.GetObjectRange(simCtx, sourceKey, startByte, endByte)
+					// Create per-operation context with fixed timeout
+					// This ensures operations have sufficient time even near test end
+					readCtx, readCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+					readResult := ops.GetObjectRange(readCtx, sourceKey, startByte, endByte)
+					readCancel()
 
 					// Collect metrics without locks
 					if readResult.Success {
@@ -351,7 +355,10 @@ func (t *TranscodeTest) runTranscodeSimulation(ctx context.Context) (*TranscodeM
 					outputKey := fmt.Sprintf("%s/transcode/outputs/video-%03d/segment-%d-%d.bin",
 						t.validator.config.Prefix, sourceIdx, jobID, time.Now().UnixNano())
 
-					writeResult := ops.PutObject(simCtx, outputKey, segmentData)
+					// Create per-operation context with fixed timeout
+					writeCtx, writeCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+					writeResult := ops.PutObject(writeCtx, outputKey, segmentData)
+					writeCancel()
 
 					// Collect metrics without locks
 					if writeResult.Success {
@@ -367,7 +374,10 @@ func (t *TranscodeTest) runTranscodeSimulation(ctx context.Context) (*TranscodeM
 
 					// 3. Read-after-write consistency check
 					if writeResult.Success {
-						immediate, eventual, failed, convergenceTime := checkReadAfterWriteConsistency(simCtx, ops, outputKey)
+						// Create per-operation context with fixed timeout
+						consCtx, consCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+						immediate, eventual, failed, convergenceTime := checkReadAfterWriteConsistency(consCtx, ops, outputKey)
+						consCancel()
 
 						if immediate {
 							localMetrics.consImmediate++

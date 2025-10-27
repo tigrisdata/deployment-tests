@@ -73,8 +73,9 @@ func (c *Logger) StatsSummaryf(sourceRegion, targetRegion string, stats Converge
 		stats.Iterations)
 
 	if stats.ImmediateCount+stats.EventualCount > 0 {
-		fmt.Printf("    Convergence - Avg: %s%8s%s, P95: %s%8s%s, P99: %s%8s%s\n",
+		fmt.Printf("    Convergence - Avg: %s%8s%s, P50: %s%8s%s, P95: %s%8s%s, P99: %s%8s%s\n",
 			ColorBrightWhite, formatDuration(stats.AvgTime), ColorReset,
+			ColorBrightWhite, formatDuration(stats.P50Time), ColorReset,
 			ColorBrightWhite, formatDuration(stats.P95Time), ColorReset,
 			ColorBrightWhite, formatDuration(stats.P99Time), ColorReset)
 	}

@@ -89,8 +89,9 @@ func (t *PerformanceTest) Run(ctx context.Context) TestStatus {
 			result := t.runPerformanceBenchmark("PUT", size, endpoint)
 
 			// Display latency metrics
-			fmt.Printf("    Latency    - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
+			fmt.Printf("    Latency    - %sAvg:%s %s, %sP50:%s %s, %sP95:%s %s, %sP99:%s %s\n",
 				ColorBrightWhite, ColorReset, formatDurationAligned(result.AvgLatency),
+				ColorBrightWhite, ColorReset, formatDurationAligned(result.P50Latency),
 				ColorBrightWhite, ColorReset, formatDurationAligned(result.P95Latency),
 				ColorBrightWhite, ColorReset, formatDurationAligned(result.P99Latency))
 
@@ -114,6 +115,7 @@ func (t *PerformanceTest) Run(ctx context.Context) TestStatus {
 					"throughputMBps": result.ThroughputMBps,
 					"opsPerSecond":   result.OpsPerSecond,
 					"avgLatency":     result.AvgLatency,
+					"p50Latency":     result.P50Latency,
 					"p95Latency":     result.P95Latency,
 					"p99Latency":     result.P99Latency,
 				})
@@ -136,14 +138,16 @@ func (t *PerformanceTest) Run(ctx context.Context) TestStatus {
 			result := t.runPerformanceBenchmark("GET", size, endpoint)
 
 			// Display latency metrics
-			fmt.Printf("    Latency    - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
+			fmt.Printf("    Latency    - %sAvg:%s %s, %sP50:%s %s, %sP95:%s %s, %sP99:%s %s\n",
 				ColorBrightWhite, ColorReset, formatDurationAligned(result.AvgLatency),
+				ColorBrightWhite, ColorReset, formatDurationAligned(result.P50Latency),
 				ColorBrightWhite, ColorReset, formatDurationAligned(result.P95Latency),
 				ColorBrightWhite, ColorReset, formatDurationAligned(result.P99Latency))
 
 			// Display TTFB metrics (only for GET operations)
-			fmt.Printf("    TTFB       - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
+			fmt.Printf("    TTFB       - %sAvg:%s %s, %sP50:%s %s, %sP95:%s %s, %sP99:%s %s\n",
 				ColorBrightWhite, ColorReset, formatDurationAligned(result.AvgTTFB),
+				ColorBrightWhite, ColorReset, formatDurationAligned(result.P50TTFB),
 				ColorBrightWhite, ColorReset, formatDurationAligned(result.P95TTFB),
 				ColorBrightWhite, ColorReset, formatDurationAligned(result.P99TTFB))
 
@@ -167,9 +171,11 @@ func (t *PerformanceTest) Run(ctx context.Context) TestStatus {
 					"throughputMBps": result.ThroughputMBps,
 					"opsPerSecond":   result.OpsPerSecond,
 					"avgLatency":     result.AvgLatency,
+					"p50Latency":     result.P50Latency,
 					"p95Latency":     result.P95Latency,
 					"p99Latency":     result.P99Latency,
 					"avgTTFB":        result.AvgTTFB,
+					"p50TTFB":        result.P50TTFB,
 					"p95TTFB":        result.P95TTFB,
 					"p99TTFB":        result.P99TTFB,
 				})

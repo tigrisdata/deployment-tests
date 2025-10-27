@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"sort"
 	"strings"
 	"time"
 
@@ -28,6 +27,7 @@ type ConvergenceMetric struct {
 type ConvergenceStats struct {
 	Iterations       int
 	AvgTime          time.Duration
+	P50Time          time.Duration
 	P95Time          time.Duration
 	P99Time          time.Duration
 	ImmediateCount   int
@@ -168,7 +168,6 @@ func calculateStats(metrics []ConvergenceMetric) ConvergenceStats {
 		return stats
 	}
 
-	var totalTime time.Duration
 	for _, m := range metrics {
 		if m.TimedOut {
 			stats.TimeoutCount++
@@ -182,31 +181,16 @@ func calculateStats(metrics []ConvergenceMetric) ConvergenceStats {
 		}
 
 		stats.ConvergenceTimes = append(stats.ConvergenceTimes, m.ConvergenceTime)
-		totalTime += m.ConvergenceTime
 	}
 
 	successfulCount := stats.ImmediateCount + stats.EventualCount
+
 	if successfulCount > 0 {
-		stats.AvgTime = totalTime / time.Duration(successfulCount)
+		stats.AvgTime = average(stats.ConvergenceTimes)
+		stats.P50Time = percentile(stats.ConvergenceTimes, 0.50)
+		stats.P95Time = percentile(stats.ConvergenceTimes, 0.95)
+		stats.P99Time = percentile(stats.ConvergenceTimes, 0.99)
 
-		// Sort for percentile calculation
-		sort.Slice(stats.ConvergenceTimes, func(i, j int) bool {
-			return stats.ConvergenceTimes[i] < stats.ConvergenceTimes[j]
-		})
-
-		// Calculate P95
-		p95Index := int(float64(len(stats.ConvergenceTimes)) * 0.95)
-		if p95Index >= len(stats.ConvergenceTimes) {
-			p95Index = len(stats.ConvergenceTimes) - 1
-		}
-		stats.P95Time = stats.ConvergenceTimes[p95Index]
-
-		// Calculate P99
-		p99Index := int(float64(len(stats.ConvergenceTimes)) * 0.99)
-		if p99Index >= len(stats.ConvergenceTimes) {
-			p99Index = len(stats.ConvergenceTimes) - 1
-		}
-		stats.P99Time = stats.ConvergenceTimes[p99Index]
 	}
 
 	return stats

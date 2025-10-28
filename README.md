@@ -293,6 +293,16 @@ The tool uses the AWS SDK for Go v2, which supports multiple credential sources:
 1. Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
 2. AWS credentials file (`~/.aws/credentials`)
 
+## Using with GCS
+
+The tool supports testing with GCS endpoints. To use with GCS, set the `-global-endpoint` flag to the GCS endpoint URL. GCS doesn't support region-based endpoints for multi-region buckets, so you will have to set the regional endpoints to empty string.
+
+```bash
+./t3-validator -bucket my-bucket -global-endpoint https://storage.googleapis.com -regional-endpoints ""
+```
+
+For details on how to setup credentials for GCS buckets, see the [GCS documentation](https://docs.cloud.google.com/storage/docs/aws-simple-migration).
+
 ## Performance Considerations
 
 - **Object Size**: Larger objects increase latency but may improve throughput

@@ -14,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go/logging"
+	"github.com/tigrisdata/deployment-test/workload"
 )
 
 const (
@@ -141,6 +142,9 @@ func NewTigrisValidator(cfg TestConfig) (*TigrisValidator, error) {
 		globalCfg.BaseEndpoint = aws.String(cfg.GlobalEndpoint)
 		clients["global"] = s3.NewFromConfig(globalCfg, func(o *s3.Options) {
 			o.UsePathStyle = true
+			if workload.IsGCS(aws.ToString(o.BaseEndpoint)) {
+				workload.FixSigningForGCS(o)
+			}
 		})
 	}
 
@@ -150,6 +154,9 @@ func NewTigrisValidator(cfg TestConfig) (*TigrisValidator, error) {
 		regionalCfg.BaseEndpoint = aws.String(endpoint)
 		clients[endpoint] = s3.NewFromConfig(regionalCfg, func(o *s3.Options) {
 			o.UsePathStyle = true
+			if workload.IsGCS(aws.ToString(o.BaseEndpoint)) {
+				workload.FixSigningForGCS(o)
+			}
 		})
 	}
 

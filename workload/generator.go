@@ -23,7 +23,7 @@ func CreateWorkerS3Client(baseClient *s3.Client) *s3.Client {
 		Transport: &http.Transport{
 			MaxIdleConns:        100,
 			MaxIdleConnsPerHost: 20,
-			MaxConnsPerHost:     0,                // Unlimited
+			MaxConnsPerHost:     0, // Unlimited
 			IdleConnTimeout:     90 * time.Second,
 			DisableCompression:  true,
 			WriteBufferSize:     256 * 1024,
@@ -52,6 +52,10 @@ func CreateWorkerS3Client(baseClient *s3.Client) *s3.Client {
 			o.RetryMaxAttempts = originalOptions.RetryMaxAttempts
 			o.RetryMode = originalOptions.RetryMode
 			o.HTTPClient = httpClient // Set worker-specific HTTP client
+
+			if IsGCS(aws.ToString(originalOptions.BaseEndpoint)) {
+				FixSigningForGCS(o)
+			}
 		},
 	}
 
@@ -61,7 +65,7 @@ func CreateWorkerS3Client(baseClient *s3.Client) *s3.Client {
 // WorkloadGenerator orchestrates workload generation and benchmark execution
 type WorkloadGenerator struct {
 	config      *WorkloadConfig
-	baseClient  *s3.Client  // Base S3 client to clone for workers
+	baseClient  *s3.Client // Base S3 client to clone for workers
 	keyGen      *KeyGenerator
 	workerSeeds []int64
 }

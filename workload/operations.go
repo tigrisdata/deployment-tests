@@ -76,6 +76,11 @@ func NewS3Operations(client *s3.Client, bucketName string, useMultipart bool, mu
 		u.PartSize = multipartSize
 		u.Concurrency = 50          // Upload up to 50 parts in parallel for high throughput
 		u.LeavePartsOnError = false // Clean up failed uploads
+
+		// GCS doesn't support checksum calculation for multipart uploads
+		if IsGCS(aws.ToString(client.Options().BaseEndpoint)) {
+			u.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+		}
 	})
 
 	// Create AWS SDK's built-in downloader with optimized settings

@@ -1,3 +1,8 @@
+// GCS supports the S3 API but has specific requirements around request signing.
+//
+// This package provides middleware to temporarily remove problematic headers before
+// signing, then restore them after signing is complete. This ensures the signature
+// matches what GCS expects while preserving the headers for the actual HTTP request.
 package workload
 
 import (
@@ -28,8 +33,12 @@ func skipHeaders(headers []string) middleware.FinalizeMiddleware {
 			}
 			s := make(map[string]string, len(headers))
 			for _, h := range headers {
-				s[h] = req.Header.Get(h)
-				req.Header.Del(h)
+				// Case-insensitive header lookup
+				val := req.Header.Get(h)
+				if val != "" {
+					s[h] = val
+					req.Header.Del(h)
+				}
 			}
 			ctx = middleware.WithStackValue(ctx, skipHeadersKey{}, s)
 			return next.HandleFinalize(ctx, in)
@@ -55,14 +64,27 @@ func restoreSkipped() middleware.FinalizeMiddleware {
 }
 
 func FixSigningForGCS(o *s3.Options) {
+	// Set checksum calculation to 'when_required' for GCS compatibility
+	// AWS SDK v2 changed defaults which broke compatibility with GCS
+	// See: https://www.beginswithdata.com/2025/05/14/aws-s3-tools-with-gcs/
 	o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 	o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
-	headers := []string{"Accept-Encoding"}
+
+	o.UsePathStyle = true
+
+	// Headers that must be excluded from signature calculation for GCS compatibility
+	// GCS's S3 implementation doesn't expect these headers in the signature
+	// See: https://github.com/aws/aws-sdk-go-v2/issues/1816
+	headers := []string{
+		"Accept-Encoding",
+	}
 	o.APIOptions = append(o.APIOptions, func(stack *middleware.Stack) error {
+		// Insert before signing to remove headers from signature calculation
 		if err := stack.Finalize.Insert(skipHeaders(headers), "Signing", middleware.Before); err != nil {
 			return err
 		}
 
+		// Insert after signing to restore headers for the actual HTTP request
 		return stack.Finalize.Insert(restoreSkipped(), "Signing", middleware.After)
 	})
 }

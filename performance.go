@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/tigrisdata/deployment-test/workload"
 )
 
@@ -44,6 +45,9 @@ func (t *PerformanceTest) Cleanup(ctx context.Context) error {
 // Run executes the performance test
 func (t *PerformanceTest) Run(ctx context.Context) TestStatus {
 	startTime := time.Now()
+
+	// Generate unique run ID for this test run to ensure isolation across parallel VMs
+	runID := uuid.New().String()
 
 	fmt.Printf("\n%s%s%s\n", ColorYellow, strings.Repeat("=", 80), ColorReset)
 	fmt.Println(" PERFORMANCE TESTS")
@@ -86,7 +90,7 @@ func (t *PerformanceTest) Run(ctx context.Context) TestStatus {
 				multipartInfo = fmt.Sprintf(", multipart: %d MiB parts", size.MultipartSize/(1024*1024))
 			}
 			fmt.Printf("  Testing %s (%d records, %d ops%s)...\n", size.DisplayName, size.RecordCount, size.OpCount, multipartInfo)
-			result := t.runPerformanceBenchmark("PUT", size, endpoint)
+			result := t.runPerformanceBenchmark("PUT", size, endpoint, runID)
 
 			// Display latency metrics
 			fmt.Printf("    Latency    - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
@@ -133,7 +137,7 @@ func (t *PerformanceTest) Run(ctx context.Context) TestStatus {
 		getResults := make([]map[string]interface{}, 0)
 		for _, size := range t.validator.config.BenchmarkSizes {
 			fmt.Printf("  Testing %s (%d records, %d ops)...\n", size.DisplayName, size.RecordCount, size.OpCount)
-			result := t.runPerformanceBenchmark("GET", size, endpoint)
+			result := t.runPerformanceBenchmark("GET", size, endpoint, runID)
 
 			// Display latency metrics
 			fmt.Printf("    Latency    - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
@@ -201,7 +205,7 @@ func (t *PerformanceTest) Run(ctx context.Context) TestStatus {
 }
 
 // runPerformanceBenchmark runs a single benchmark that collects both latency and throughput metrics
-func (t *PerformanceTest) runPerformanceBenchmark(operation string, size BenchmarkSize, endpoint string) workload.BenchmarkResult {
+func (t *PerformanceTest) runPerformanceBenchmark(operation string, size BenchmarkSize, endpoint string, runID string) workload.BenchmarkResult {
 	// Determine operation type
 	var opType workload.OpType
 	if operation == "PUT" {
@@ -214,7 +218,7 @@ func (t *PerformanceTest) runPerformanceBenchmark(operation string, size Benchma
 	config := workload.WorkloadConfig{
 		Bucket:          t.validator.config.BucketName,
 		Endpoint:        endpoint,
-		Prefix:          fmt.Sprintf("%s/%s-%d", t.validator.config.Prefix, operation, size.ObjectSize),
+		Prefix:          fmt.Sprintf("%s/%s/%s-%d", t.validator.config.Prefix, runID, operation, size.ObjectSize),
 		ObjectSize:      size.ObjectSize,
 		RecordCount:     size.RecordCount, // Number of records to preload
 		OperationCount:  size.OpCount,     // Number of operations to run

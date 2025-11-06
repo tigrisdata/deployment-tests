@@ -20,9 +20,11 @@ type TranscodeMetrics struct {
 	SuccessOps    int64
 	ErrorOps      int64
 	AvgLatency    time.Duration
+	P50Latency    time.Duration
 	P95Latency    time.Duration
 	P99Latency    time.Duration
 	AvgTTFB       time.Duration
+	P50TTFB       time.Duration
 	P95TTFB       time.Duration
 	P99TTFB       time.Duration
 	ThroughputMBs float64
@@ -38,6 +40,7 @@ type ConsistencyMetrics struct {
 	EventualReads       int64
 	FailedReads         int64
 	AvgLatency          time.Duration
+	P50Latency          time.Duration
 	P95Latency          time.Duration
 	P99Latency          time.Duration
 	TargetMetPercentage float64 // Percentage meeting <200ms target
@@ -450,12 +453,14 @@ func (t *TranscodeTest) runTranscodeSimulation(ctx context.Context) (*TranscodeM
 func (t *TranscodeTest) calculateMetrics(m *TranscodeMetrics, duration time.Duration) {
 	if len(m.Latencies) > 0 {
 		m.AvgLatency = average(m.Latencies)
+		m.P50Latency = percentile(m.Latencies, 0.50)
 		m.P95Latency = percentile(m.Latencies, 0.95)
 		m.P99Latency = percentile(m.Latencies, 0.99)
 	}
 
 	if len(m.TTFBs) > 0 {
 		m.AvgTTFB = average(m.TTFBs)
+		m.P50TTFB = percentile(m.TTFBs, 0.50)
 		m.P95TTFB = percentile(m.TTFBs, 0.95)
 		m.P99TTFB = percentile(m.TTFBs, 0.99)
 	}
@@ -469,6 +474,7 @@ func (t *TranscodeTest) calculateMetrics(m *TranscodeMetrics, duration time.Dura
 func (t *TranscodeTest) calculateConsistencyMetrics(m *ConsistencyMetrics) {
 	if len(m.Latencies) > 0 {
 		m.AvgLatency = average(m.Latencies)
+		m.P50Latency = percentile(m.Latencies, 0.50)
 		m.P95Latency = percentile(m.Latencies, 0.95)
 		m.P99Latency = percentile(m.Latencies, 0.99)
 	}
@@ -482,12 +488,14 @@ func (t *TranscodeTest) calculateConsistencyMetrics(m *ConsistencyMetrics) {
 func (t *TranscodeTest) displayResults(read, write *TranscodeMetrics, cons *ConsistencyMetrics) {
 	fmt.Printf("\n%sRead Operations (Range Requests, %s chunks):%s\n",
 		ColorBrightWhite, formatBytes(t.validator.config.TranscodeConfig.ChunkSize), ColorReset)
-	fmt.Printf("  Latency    - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
+	fmt.Printf("  Latency    - %sAvg:%s %s, %sP50:%s %s, %sP95:%s %s, %sP99:%s %s\n",
 		ColorBrightWhite, ColorReset, formatDurationAligned(read.AvgLatency),
+		ColorBrightWhite, ColorReset, formatDurationAligned(read.P50Latency),
 		ColorBrightWhite, ColorReset, formatDurationAligned(read.P95Latency),
 		ColorBrightWhite, ColorReset, formatDurationAligned(read.P99Latency))
-	fmt.Printf("  TTFB       - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
+	fmt.Printf("  TTFB       - %sAvg:%s %s, %sP50:%s %s, %sP95:%s %s, %sP99:%s %s\n",
 		ColorBrightWhite, ColorReset, formatDurationAligned(read.AvgTTFB),
+		ColorBrightWhite, ColorReset, formatDurationAligned(read.P50TTFB),
 		ColorBrightWhite, ColorReset, formatDurationAligned(read.P95TTFB),
 		ColorBrightWhite, ColorReset, formatDurationAligned(read.P99TTFB))
 	// Calculate bandwidth for read operations in Gbps
@@ -506,8 +514,9 @@ func (t *TranscodeTest) displayResults(read, write *TranscodeMetrics, cons *Cons
 		formatBytes(t.validator.config.TranscodeConfig.SegmentSizeMin),
 		formatBytes(t.validator.config.TranscodeConfig.SegmentSizeMax),
 		ColorReset)
-	fmt.Printf("  Latency    - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
+	fmt.Printf("  Latency    - %sAvg:%s %s, %sP50:%s %s, %sP95:%s %s, %sP99:%s %s\n",
 		ColorBrightWhite, ColorReset, formatDurationAligned(write.AvgLatency),
+		ColorBrightWhite, ColorReset, formatDurationAligned(write.P50Latency),
 		ColorBrightWhite, ColorReset, formatDurationAligned(write.P95Latency),
 		ColorBrightWhite, ColorReset, formatDurationAligned(write.P99Latency))
 	// Calculate average write size and bandwidth in Gbps
@@ -523,8 +532,9 @@ func (t *TranscodeTest) displayResults(read, write *TranscodeMetrics, cons *Cons
 	fmt.Printf("\n")
 
 	fmt.Printf("\n%sRead-After-Write Consistency:%s\n", ColorBrightWhite, ColorReset)
-	fmt.Printf("  Convergence - %sAvg:%s %s, %sP95:%s %s, %sP99:%s %s\n",
+	fmt.Printf("  Convergence - %sAvg:%s %s, %sP50:%s %s, %sP95:%s %s, %sP99:%s %s\n",
 		ColorBrightWhite, ColorReset, formatDurationAligned(cons.AvgLatency),
+		ColorBrightWhite, ColorReset, formatDurationAligned(cons.P50Latency),
 		ColorBrightWhite, ColorReset, formatDurationAligned(cons.P95Latency),
 		ColorBrightWhite, ColorReset, formatDurationAligned(cons.P99Latency))
 
@@ -587,53 +597,4 @@ func checkReadAfterWriteConsistency(ctx context.Context, ops *workload.S3Operati
 
 	// Timeout or max retries exceeded
 	return false, false, true, 0
-}
-
-// Helper functions for statistics
-func average(durations []time.Duration) time.Duration {
-	if len(durations) == 0 {
-		return 0
-	}
-	var sum time.Duration
-	for _, d := range durations {
-		sum += d
-	}
-	return sum / time.Duration(len(durations))
-}
-
-func percentile(durations []time.Duration, p float64) time.Duration {
-	if len(durations) == 0 {
-		return 0
-	}
-	sorted := make([]time.Duration, len(durations))
-	copy(sorted, durations)
-
-	// Simple bubble sort for small datasets
-	for i := 0; i < len(sorted); i++ {
-		for j := i + 1; j < len(sorted); j++ {
-			if sorted[i] > sorted[j] {
-				sorted[i], sorted[j] = sorted[j], sorted[i]
-			}
-		}
-	}
-
-	idx := int(float64(len(sorted)) * p)
-	if idx >= len(sorted) {
-		idx = len(sorted) - 1
-	}
-	return sorted[idx]
-}
-
-// formatBytes formats bytes into human-readable format
-func formatBytes(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %ciB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }

@@ -40,13 +40,12 @@ run:
 run-custom:
 	@if [ -z "$(BUCKET)" ]; then \
 		echo "Error: BUCKET environment variable is required"; \
-		echo "Usage: make run-custom BUCKET=your-bucket-name CONCURRENCY=10 DURATION=5m"; \
+		echo "Usage: make run-custom BUCKET=your-bucket-name CONCURRENCY=10"; \
 		exit 1; \
 	fi
 	@echo "Running Tigris performance test suite with custom parameters..."
 	./$(BINARY_NAME) -bucket $(BUCKET) \
 		-concurrency $(or $(CONCURRENCY),10) \
-		-duration $(or $(DURATION),5m) \
 		-prefix $(or $(PREFIX),perf-test) \
 		-global-endpoint $(or $(GLOBAL_ENDPOINT),"") \
 		-regional-endpoints $(or $(REGIONAL_ENDPOINTS),"")
@@ -107,7 +106,7 @@ help:
 	@echo "Examples:"
 	@echo "  make build"
 	@echo "  make run BUCKET=my-test-bucket"
-	@echo "  make run-custom BUCKET=my-bucket CONCURRENCY=10 DURATION=5m"
+	@echo "  make run-custom BUCKET=my-bucket CONCURRENCY=10"
 	@echo "  make test-endpoints BUCKET=my-bucket GLOBAL_ENDPOINT=https://t3.storage.dev REGIONAL_ENDPOINTS=https://sjc.storage.dev"
 	@echo "  make clean"
 
@@ -116,15 +115,15 @@ help:
 dev: deps build
 	@echo "Development setup complete"
 
-# Quick test run (short duration)
+# Quick test run
 .PHONY: quick-test
 quick-test:
 	@if [ -z "$(BUCKET)" ]; then \
 		echo "Error: BUCKET environment variable is required"; \
 		exit 1; \
 	fi
-	@echo "Running quick test (1 minute)..."
-	./$(BINARY_NAME) -bucket $(BUCKET) -duration 1m -concurrency 2
+	@echo "Running quick test..."
+	./$(BINARY_NAME) -bucket $(BUCKET) -concurrency 2
 
 # Test with specific endpoints
 .PHONY: test-endpoints
@@ -138,5 +137,4 @@ test-endpoints:
 	./$(BINARY_NAME) -bucket $(BUCKET) \
 		-global-endpoint $(GLOBAL_ENDPOINT) \
 		-regional-endpoints $(REGIONAL_ENDPOINTS) \
-		-concurrency $(or $(CONCURRENCY),10) \
-		-duration $(or $(DURATION),5m)
+		-concurrency $(or $(CONCURRENCY),10)

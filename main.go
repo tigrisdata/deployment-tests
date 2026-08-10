@@ -35,11 +35,12 @@ const (
 	// Defaults
 	DefaultConcurrency         = 20
 	DefaultPrefix              = "t3-validator"
-	DefaultGlobalEndpoint      = "https://oracle.storage.dev"
-	DefaultRegionalEndpointIAD = "https://iad.storage.dev"
-	DefaultRegionalEndpointORD = "https://ord.storage.dev"
-	DefaultRegionalEndpointSJC = "https://sjc.storage.dev"
+	DefaultGlobalEndpoint      = "https://t3.storage.dev"
+	DefaultRegionalEndpointIAD = "https://iad1.storage.dev"
+	DefaultRegionalEndpointORD = "https://ord1.storage.dev"
+	DefaultRegionalEndpointSJC = "https://sjc1.storage.dev"
 	DefaultTests               = "all"
+	DefaultRegion              = "auto"
 )
 
 // Custom logger that suppresses AWS SDK warnings
@@ -124,13 +125,19 @@ func NewTigrisValidator(cfg TestConfig) (*TigrisValidator, error) {
 		Timeout: 5 * time.Minute, // Generous timeout for large objects
 	}
 
-	// Load AWS configuration (region will be automatically detected)
+	// Load AWS configuration (region is picked up from the environment when set)
 	awsCfg, err := config.LoadDefaultConfig(context.TODO(),
 		config.WithLogger(&silentLogger{}),
 		config.WithHTTPClient(httpClient),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	// The S3 endpoint resolver requires a region even when the endpoint is
+	// pinned, so fall back to "auto" when nothing is configured.
+	if awsCfg.Region == "" {
+		awsCfg.Region = DefaultRegion
 	}
 
 	// Create clients for different endpoints

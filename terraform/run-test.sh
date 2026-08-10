@@ -17,7 +17,7 @@ Notes:
 
 Examples:
   run-test.sh \
-    --cmd 'deployment-tests/t3-validator -bucket tigris-consistency-test-bucket -global-endpoint "https://oracle.storage.dev" -regional-endpoints "https://iad.storage.dev,https://ord.storage.dev,https://sjc.storage.dev" > results.log' \
+    --cmd 'deployment-tests/t3-validator -bucket tigris-consistency-test-bucket -global-endpoint "https://t3.storage.dev" -regional-endpoints "https://iad1.storage.dev,https://ord1.storage.dev,https://sjc1.storage.dev" > results.log' \
     --remote-file "/home/opc/results.log" \
     --out-dir ./downloads
 

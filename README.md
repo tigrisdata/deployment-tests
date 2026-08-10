@@ -99,8 +99,8 @@ The test suite includes four types of tests that can be run independently or tog
 | `-bucket`             | S3 bucket name (required)                                                                       | -                                                                       |
 | `-concurrency`        | Number of concurrent operations                                                                 | 20                                                                      |
 | `-prefix`             | S3 key prefix                                                                                   | perf-test                                                               |
-| `-global-endpoint`    | Global S3 endpoint URL                                                                          | https://oracle.storage.dev                                              |
-| `-regional-endpoints` | Comma-separated regional endpoints                                                              | https://iad.storage.dev,https://ord.storage.dev,https://sjc.storage.dev |
+| `-global-endpoint`    | Global S3 endpoint URL                                                                          | https://t3.storage.dev                                                  |
+| `-regional-endpoints` | Comma-separated regional endpoints                                                              | https://iad1.storage.dev,https://ord1.storage.dev,https://sjc1.storage.dev |
 | `-tests`              | Comma-separated list of tests to run: `connectivity`, `consistency`, `performance`, `transcode` | all                                                                     |
 
 ### Examples
@@ -158,16 +158,16 @@ The tool provides comprehensive performance metrics:
  CONNECTIVITY TESTS
 ================================================================================
 
-Testing Global Endpoint: https://oracle.storage.dev
+Testing Global Endpoint: https://t3.storage.dev
   S3 Connectivity: SUCCESS - 37.504ms
 
-Testing Regional Endpoint: https://iad.storage.dev
+Testing Regional Endpoint: https://iad1.storage.dev
   S3 Connectivity: SUCCESS - 24.337ms
 
-Testing Regional Endpoint: https://ord.storage.dev
+Testing Regional Endpoint: https://ord1.storage.dev
   S3 Connectivity: SUCCESS - 172.161ms
 
-Testing Regional Endpoint: https://sjc.storage.dev
+Testing Regional Endpoint: https://sjc1.storage.dev
   S3 Connectivity: SUCCESS - 410.564ms
 ```
 
@@ -178,19 +178,19 @@ Testing Regional Endpoint: https://sjc.storage.dev
  CONSISTENCY TESTS
 ================================================================================
 
-Testing Global Endpoint: https://oracle.storage.dev
+Testing Global Endpoint: https://t3.storage.dev
 
 PUT|GET (Read-After-Write Consistency) (50 iterations)
   global -> global (50 iterations)
     Convergence - Avg:       0s, P95:       0s, P99:       0s
     Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
-  global -> iad (50 iterations)
+  global -> iad1 (50 iterations)
     Convergence - Avg:       0s, P95:       0s, P99:       0s
     Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
-  global -> ord (50 iterations)
+  global -> ord1 (50 iterations)
     Convergence - Avg:       0s, P95:       0s, P99:       0s
     Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
-  global -> sjc (50 iterations)
+  global -> sjc1 (50 iterations)
     Convergence - Avg:       0s, P95:       0s, P99:       0s
     Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
   SUCCESS - Read-After-Write Consistency test completed (28.100s)
@@ -200,13 +200,13 @@ PUT|LIST (List-After-Write Consistency) (10 iterations)
   global -> global (10 iterations)
     Convergence - Avg:       0s, P95:       0s, P99:       0s
     Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
-  global -> iad (10 iterations)
+  global -> iad1 (10 iterations)
     Convergence - Avg:       0s, P95:       0s, P99:       0s
     Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
-  global -> ord (10 iterations)
+  global -> ord1 (10 iterations)
     Convergence - Avg: 440.000ms, P95: 700.000ms, P99: 700.000ms
     Distribution - Immediate:   0.0%, Eventual: 100.0%, Timeout:   0.0%
-  global -> sjc (10 iterations)
+  global -> sjc1 (10 iterations)
     Convergence - Avg:       0s, P95:       0s, P99:       0s
     Distribution - Immediate: 100.0%, Eventual:   0.0%, Timeout:   0.0%
   SUCCESS - List-After-Write Consistency test completed (8.404s)

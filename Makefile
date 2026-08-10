@@ -107,7 +107,7 @@ help:
 	@echo "  make build"
 	@echo "  make run BUCKET=my-test-bucket"
 	@echo "  make run-custom BUCKET=my-bucket CONCURRENCY=10"
-	@echo "  make test-endpoints BUCKET=my-bucket GLOBAL_ENDPOINT=https://t3.storage.dev REGIONAL_ENDPOINTS=https://sjc.storage.dev"
+	@echo "  make test-endpoints BUCKET=my-bucket GLOBAL_ENDPOINT=https://t3.storage.dev REGIONAL_ENDPOINTS=https://sjc1.storage.dev"
 	@echo "  make clean"
 
 # Development targets
